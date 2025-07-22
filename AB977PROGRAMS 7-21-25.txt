@@ -24,4 +24,4 @@ INSERT INTO hdis_sbx.sbx_loren_hardy.ab977programs (DEPT, OTHER_FUNDER) VALUES
 ('CalVet', 'CA-CALVET-VSSR'),
 ('DHCS', 'CA-DHCS-BHBH'),
 ('HCD', 'CA-HCD-HHAP5'),
-('HCD', 'CA-HCD-ERF4L');;
+('HCD', 'CA-HCD-ERF4L');
