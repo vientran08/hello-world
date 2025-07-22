@@ -1,0 +1,95 @@
+CREATE OR REPLACE PROCEDURE HDIS_SBX.SBX_LOREN_HARDY.REFRESH_PROJECT_DETAIL_QA()
+RETURNS VARCHAR
+LANGUAGE SQL
+EXECUTE AS OWNER
+AS '
+BEGIN
+
+-- Truncate project_detail_qa
+TRUNCATE TABLE project_detail_qa;
+
+-- Insert data into the project_detail_qa table from the query 
+INSERT INTO project_detail_qa (other_funder, program, dept, coc_dashboard_name, project_id, project_type, grant_id, grant_start_date, grant_end_date, household_type, project_name, organization_id, organization_name, client_sk, hoh_ind, exit_date, entry_date, active_ind, active_quarter, operating_end_date, date_loaded)
+with household_type as (
+select
+household_id
+,source_file
+,household_type
+from hdis_prod.edw.vw_household_info_entry_exit 
+union all
+select
+household_id
+,source_file
+,''Total'' household_type
+from hdis_prod.edw.vw_household_info_entry_exit 
+),
+QuarterRanges AS (
+			SELECT CAST(YEAR(calendar_date) AS VARCHAR(4)) || '' Q'' || CAST(QUARTER(calendar_date) AS VARCHAR(1)) AS Active_Quarter, MIN(calendar_date) AS QuarterStart, MAX(calendar_date) AS QuarterEnd
+			FROM hdis_prod.edw.dim_date
+			WHERE date(calendar_date) >= ''2023-01-01'' AND date(calendar_date) <= (
+					SELECT last_submission_date
+					FROM hdis_prod.edw.submission_date
+					)
+			GROUP BY YEAR(calendar_date), QUARTER(calendar_date)
+			)
+select
+sbx.other_funder
+,case when sbx.other_funder = ''CA-CALICH-ERF1'' then ''ERF 1''
+      when sbx.other_funder = ''CA-CALICH-ERF2L'' then ''ERF 2L''
+      when sbx.other_funder = ''CA-CALICH-ERF2R'' then ''ERF 2R''
+      when sbx.other_funder = ''CA-CALICH-ERF3L'' then ''ERF 3L''
+      when sbx.other_funder = ''CA-HCD-ERF3R'' then ''ERF 3R''
+      when sbx.other_funder = ''CA-HCD-ERF4L'' then ''ERF 4L''
+      when sbx.other_funder = ''CA-CALICH-FHC'' then ''FHC''
+      when sbx.other_funder = ''CA-CALICH-HHAP3'' then ''HHAP 3''
+      when sbx.other_funder = ''CA-CALICH-HHAP4'' then ''HHAP 4''
+      when sbx.other_funder = ''CA-HCD-HHAP5'' then ''HHAP 5''
+      when sbx.other_funder = ''CA-CALVET-VSSR'' then ''VSSR''
+      when sbx.other_funder = ''CA-CCCCO-CCHHIP'' then ''CCHHIP''
+      when sbx.other_funder = ''CA-CDSS-BFH'' then ''BFH''
+      when sbx.other_funder = ''CA-CDSS-HDAP'' then ''HDAP''
+      when sbx.other_funder = ''CA-CDSS-HSP'' then ''HSP''
+      when sbx.other_funder = ''CA-CDSS-HomeSafe'' then ''HomeSafe''
+      when sbx.other_funder = ''CA-County-NPLH'' then ''County NPLH''
+      when sbx.other_funder = ''CA-HCD-HHCII'' then ''HHCII''
+      when sbx.other_funder = ''CA-HCD-Homekey'' then ''Homekey''
+      when sbx.other_funder = ''CA-HCD-MHP'' then ''MHP''
+      when sbx.other_funder = ''CA-HCD-NPLH'' then ''HCD NPLH''
+      when sbx.other_funder = ''CA-HCD-VHHP'' then ''VHHP''
+      when sbx.other_funder = ''CA-HCFC-HHAP1'' then ''HHAP 1''
+      when sbx.other_funder = ''CA-HCFC-HHAP2'' then ''HHAP 2''
+      when sbx.other_funder = ''CA-DHCS-BHBH'' then ''BHBH''
+      end as Program
+,sbx.dept
+,dc.coc_dashboard_name
+,dp.project_id as project_id
+,dp.project_type
+,df.grant_id
+,df.start_date as grant_start_date
+,df.end_date as grant_end_date
+,case when ht.household_type is null then ''Unknown'' else ht.household_type end as household_type
+,dp.project_name
+,dp.organization_id
+,dp.organization_name
+,fe.client_sk
+,fe.hoh_ind
+,fe.exit_date
+,fe.entry_date
+,case when date(dp.operating_end_date) is null or date(dp.operating_end_date) > current_date() then ''Active'' else ''Inactive'' end as active_ind
+,qr.active_quarter
+,dp.operating_end_date
+,current_date() as date_loaded
+from hdis_prod.edw.fact_enroll fe
+left join household_type ht on fe.household_id = ht.household_id and fe.source_file = ht.source_file
+join hdis_prod.edw.dim_funder df on fe.project_sk = df.project_sk
+join hdis_prod.edw.dim_project dp on dp.project_sk = df.project_sk
+join ab977programs sbx on upper(sbx.other_funder) = upper(df.other_funder)
+join hdis_prod.edw.dim_coc dc on dc.coc_sk = fe.coc_sk
+join quarterranges qr ON (date(fe.entry_date) <= date(qr.quarterend)) AND (date(fe.exit_date) >= date(qr.quarterstart) OR date(fe.exit_date) IS NULL)
+WHERE (((date(fe.exit_date) IS NULL OR date(fe.exit_date) > date(df.start_date)) AND (date(fe.entry_date) < date(df.end_date)) AND date(df.end_date) IS NOT NULL) OR ((date(fe.exit_date) IS NULL OR date(fe.exit_date) > date(df.start_date)) AND date(df.end_date) IS NULL)) AND (date(fe.entry_date) <= (SELECT DATE(LAST_SUBMISSION_DATE) FROM HDIS_PROD.EDW.SUBMISSION_DATE )) AND (date(fe.exit_date) >= ''2023-01-01'' OR (date(fe.exit_date) IS NULL)) and client_sk <> ''-2''
+;
+
+-- Return message to confirm that the table has been refreshed
+RETURN ''Target tables refreshed successfully.'';
+END;
+';

@@ -1,0 +1,127 @@
+CREATE OR REPLACE PROCEDURE HDIS_SBX.SBX_LOREN_HARDY.REFRESH_PEOPLE_SERVED_QA()
+RETURNS VARCHAR
+LANGUAGE SQL
+EXECUTE AS OWNER
+AS '
+BEGIN
+
+
+--Truncate PEOPLE SERVED table
+TRUNCATE TABLE people_served_qa;
+
+--Insert new data into the PEOPLE SERVED table from the query
+INSERT INTO people_served_qa (id_value, organization_name, project_name_and_id, quarter_year, project_type_name, funder_name, other_funder, householdtype, relationship_to_hoh, source_file, age, client_date, exit_date, date_loaded)
+WITH household_type AS (
+        SELECT Household_ID
+                ,a.Source_File
+                ,CASE WHEN SUM(CASE WHEN datediff(''YEAR'', try_to_date(dob), try_to_date(entry_date)) >= 18 THEN 1 ELSE 0 END) > 0 AND SUM(CASE WHEN datediff(''YEAR'', try_to_date(dob), try_to_date(entry_date)) < 18 THEN 1 ELSE 0 END) > 0 THEN ''AC'' 
+WHEN SUM(CASE WHEN datediff(''YEAR'', try_to_date(dob), try_to_date(entry_date)) >= 18 THEN 1 ELSE 0 END) > 0 AND SUM(CASE WHEN datediff(''YEAR'', try_to_date(dob), try_to_date(entry_date)) < 18 THEN 1 ELSE 0 END) = 0 AND SUM(CASE WHEN try_to_date(dob) IS NULL OR try_to_date(entry_date) IS NULL THEN 1 ELSE 0 END) = 0 THEN ''AO'' 
+WHEN SUM(CASE WHEN datediff(''YEAR'', try_to_date(dob), try_to_date(entry_date)) >= 18 THEN 1 ELSE 0 END) = 0 AND SUM(CASE WHEN datediff(''YEAR'', try_to_date(dob), try_to_date(entry_date)) < 18 THEN 1 ELSE 0 END) > 0 AND SUM(CASE WHEN try_to_date(dob) IS NULL OR try_to_date(entry_date) IS NULL THEN 1 ELSE 0 END) = 0 THEN ''CO'' 
+ELSE ''Unknown'' END AS HouseholdType
+    FROM hdis_dev.staging.pstg_enrollment a
+    INNER JOIN hdis_dev.staging.pstg_client b ON a.personal_id = b.personal_id AND a.source_file = b.source_file
+    GROUP BY Household_ID,a.Source_File
+UNION ALL
+        SELECT Household_ID
+                ,a.Source_File
+                ,''Total'' AS HouseholdType
+    FROM hdis_dev.staging.pstg_enrollment a
+    INNER JOIN hdis_dev.staging.pstg_client b ON a.personal_id = b.personal_id AND a.source_file = b.source_file
+    GROUP BY Household_ID,a.Source_File
+                                    )
+select
+cl.personal_id||cl.source_file id_value
+,org.organization_name
+,pro.project_name||''|''||pro.project_id project_name_and_id
+,CONCAT (YEAR(COALESCE(try_to_date(EXIT_DATE), CURRENT_DATE)),'' Q'',QUARTER(COALESCE(try_to_date(EXIT_DATE), CURRENT_DATE))) AS quarter_year
+,CASE pro.PROJECT_TYPE
+        WHEN 0 THEN ''Emergency Shelter – Entry Exit''
+        WHEN 1 THEN ''Emergency Shelter – Night-by-Night''
+        WHEN 2 THEN ''Transitional Housing''
+        WHEN 3 THEN ''PH – Permanent Supportive Housing''
+        WHEN 4 THEN ''Street Outreach''
+        WHEN 6 THEN ''Services Only''
+        WHEN 7 THEN ''Other''
+        WHEN 8 THEN ''Safe Haven''
+        WHEN 9 THEN ''PH – Housing Only''
+        WHEN 10 THEN ''PH – Housing with Services (no disability required for entry)''
+        WHEN 11 THEN ''Day Shelter''
+        WHEN 12 THEN ''Homelessness Prevention''
+        WHEN 13 THEN ''PH – Rapid Re-Housing''
+        WHEN 14 THEN ''Coordinated Entry''
+        ELSE ''Unknown''
+    END AS PROJECT_TYPE_NAME
+,CASE fun.FUNDER
+        WHEN 1 THEN ''HUD: CoC – Homelessness Prevention (High Performing Comm. Only)''
+        WHEN 2 THEN ''HUD: CoC – Permanent Supportive Housing''
+        WHEN 3 THEN ''HUD: CoC – Rapid Re-Housing''
+        WHEN 4 THEN ''HUD: CoC – Supportive Services Only''
+        WHEN 5 THEN ''HUD: CoC – Transitional Housing''
+        WHEN 6 THEN ''HUD: CoC – Safe Haven''
+        WHEN 7 THEN ''HUD: CoC – Single Room Occupancy (SRO)''
+        WHEN 8 THEN ''HUD: ESG – Emergency Shelter (operating and/or essential services)''
+        WHEN 9 THEN ''HUD: ESG – Homelessness Prevention''
+        WHEN 10 THEN ''HUD: ESG – Rapid Rehousing''
+        WHEN 11 THEN ''HUD: ESG – Street Outreach''
+        WHEN 13 THEN ''HUD: HOPWA – Hotel/Motel Vouchers''
+        WHEN 14 THEN ''HUD: HOPWA – Housing Information''
+        WHEN 15 THEN ''HUD: HOPWA – Permanent Housing (facility based or TBRA)''
+        WHEN 16 THEN ''HUD: HOPWA – Permanent Housing Placement''
+        WHEN 17 THEN ''HUD: HOPWA – Short-Term Rent, Mortgage, Utility assistance''
+        WHEN 18 THEN ''HUD: HOPWA – Short-Term Supportive Facility''
+        WHEN 19 THEN ''HUD: HOPWA – Transitional Housing (facility based or TBRA)''
+        WHEN 20 THEN ''HUD: HUD/VASH''
+        WHEN 21 THEN ''HHS: PATH – Street Outreach & Supportive Services Only''
+        WHEN 22 THEN ''HHS: RHY – Basic Center Program (prevention and shelter)''
+        WHEN 23 THEN ''HHS: RHY – Maternity Group Home for Pregnant and Parenting Youth''
+        WHEN 24 THEN ''HHS: RHY – Transitional Living Program''
+        WHEN 25 THEN ''HHS: RHY – Street Outreach Project''
+        WHEN 26 THEN ''HHS: RHY – Demonstration Project''
+        WHEN 27 THEN ''VA: CRS Contract Residential Services''
+        WHEN 30 THEN ''VA: Community Contract Safe Haven Program''
+        WHEN 33 THEN ''VA: Supportive Services for Veteran Families''
+        WHEN 34 THEN ''N/A''
+        WHEN 35 THEN ''HUD: Pay for Success''
+        WHEN 36 THEN ''HUD: Public and Indian Housing (PIH) Programs''
+        WHEN 37 THEN ''VA: Grant Per Diem – Bridge Housing''
+        WHEN 38 THEN ''VA: Grant Per Diem – Low Demand''
+        WHEN 39 THEN ''VA: Grant Per Diem – Hospital to Housing''
+        WHEN 40 THEN ''VA: Grant Per Diem – Clinical Treatment''
+        WHEN 41 THEN ''VA: Grant Per Diem – Service Intensive Transitional Housing''
+        WHEN 42 THEN ''VA: Grant Per Diem – Transition in Place''
+        WHEN 43 THEN ''HUD: CoC – Youth Homeless Demonstration Program (YHDP)''
+        WHEN 44 THEN ''HUD: CoC – Joint Component TH/RRH''
+        WHEN 45 THEN ''VA: Grant Per Diem – Case Management/Housing Retention''
+        WHEN 46 THEN ''Local or Other Funding Source (Please Specify)''
+        WHEN 47 THEN ''HUD: ESG – CV''
+        WHEN 48 THEN ''HUD: HOPWA – CV''
+        WHEN 50 THEN ''HUD: HOME''
+        WHEN 51 THEN ''HUD: HOME (ARP)''
+        WHEN 52 THEN ''HUD: PIH (Emergency Housing Voucher)''
+        WHEN 53 THEN ''HUD: ESG – RUSH''
+        WHEN 54 THEN ''HUD: Unsheltered Special NOFO''
+        WHEN 55 THEN ''HUD: Rural Special NOFO''
+        ELSE ''Unknown''
+    END AS FUNDER_NAME
+,fun.other_funder
+,ht.householdType
+,en.relationship_to_hoh
+,ht.source_file
+,floor(months_between(CURRENT_DATE, try_to_date(cl.DOB)) / 12) as age
+,COALESCE(try_to_date(EXIT_DATE), CURRENT_DATE) CLIENT_DATE
+,ex.exit_date
+,current_date() as date_loaded
+from household_type ht
+left join hdis_dev.staging.pstg_enrollment en on ht.household_id = en.household_id and ht.source_file = en.source_file
+left join hdis_dev.staging.pstg_project pro on en.project_id = pro.project_id and en.source_file = pro.source_file
+left join hdis_dev.staging.pstg_funder fun on pro.project_id = fun.project_id and pro.source_file = fun.source_file
+left join hdis_dev.staging.pstg_organization org on pro.organization_id = org.organization_id and pro.source_file = org.source_file
+left join hdis_dev.staging.pstg_client cl on en.personal_id = cl.personal_id and en.source_file = cl.source_file
+left join hdis_dev.staging.pstg_exit ex on cl.personal_id = ex.personal_id and cl.source_file = ex.source_file
+WHERE CLIENT_DATE >= DATEADD(YEAR, - 1, DATE_TRUNC(''quarter'', DATEADD(''quarter'', - 4, CURRENT_DATE))) AND (YEAR(CLIENT_DATE) < YEAR(CURRENT_DATE) OR (YEAR(CLIENT_DATE) = YEAR(CURRENT_DATE) AND QUARTER(CLIENT_DATE) <= QUARTER(CURRENT_DATE)))
+;
+
+-- Return message to confirm that the table has been refreshed
+RETURN ''Target tables refreshed successfully.'';
+END;
+';

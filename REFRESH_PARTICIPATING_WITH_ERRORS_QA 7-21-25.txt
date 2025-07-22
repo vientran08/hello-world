@@ -1,0 +1,241 @@
+CREATE OR REPLACE PROCEDURE HDIS_SBX.SBX_LOREN_HARDY.REFRESH_PARTICIPATING_WITH_ERRORS_QA()
+RETURNS VARCHAR
+LANGUAGE SQL
+EXECUTE AS OWNER
+AS '
+BEGIN
+
+ -- Truncate participating_with_errors_qa
+TRUNCATE TABLE participating_with_errors_qa;
+
+-- Insert data into the participating_with_errors_qa table from the query 
+INSERT INTO participating_with_errors_qa (correct_other_funder, fuzzy_column_name, fuzzy_column_value, program, dept, coc_dashboard_name, project_id, grant_id, project_sk, project_name, organization_id, organization_name, project_type, start_date, end_date, client_sk, exit_date, active_ind, active_quarter, date_loaded)
+with QuarterRanges AS (
+			SELECT CAST(YEAR(calendar_date) AS VARCHAR(4)) || '' Q'' || CAST(QUARTER(calendar_date) AS VARCHAR(1)) AS Active_Quarter, MIN(calendar_date) AS QuarterStart, MAX(calendar_date) AS QuarterEnd
+			FROM hdis_prod.edw.dim_date
+			WHERE date(calendar_date) >= ''2023-01-01'' AND date(calendar_date) <= (
+					SELECT last_submission_date
+					FROM hdis_prod.edw.submission_date
+					)
+			GROUP BY YEAR(calendar_date), QUARTER(calendar_date)
+			)
+
+,
+fuzzy_match as 
+(select
+dp.project_id
+,df.grant_id
+,sbx.dept
+,case when date(dp.operating_end_date) is null or date(dp.operating_end_date) > current_date() then ''Active'' else ''Inactive'' end as active_ind
+,qr.active_quarter
+,dc.coc_dashboard_name
+,dp.project_sk
+,dp.project_name
+,dp.organization_id
+,dp.organization_name
+,dp.project_type
+,df.start_date
+,df.end_date
+,fe.client_sk
+,fe.exit_date
+,case 
+    when replace(upper(df.other_funder),'' '','''') like ''%HOMEKEY%'' then ''CA-HCD-Homekey''
+    when replace(upper(df.other_funder),'' '','''') like ''%MHP%'' then ''CA-HCD-MHP''
+    when replace(upper(df.other_funder),'' '','''') like ''%VHHP%'' then ''CA-HCD-VHHP''
+    when replace(upper(df.other_funder),'' '','''') like ''%HHCII%'' then ''CA-HCD-HHCII''
+    when replace(upper(df.other_funder),'' '','''') like ''%NPLH%'' then ''CA-HCD-NPLH''
+    when replace(upper(df.other_funder),'' '','''') like ''%CA-COUNTY-NPLH%'' then ''CA-County-NPLH''
+    when replace(upper(df.other_funder),'' '','''') like ''%HHAP1%'' then ''CA-HCFC-HHAP1''
+    when replace(upper(df.other_funder),'' '','''') like ''%HHAP2%'' then ''CA-HCFC-HHAP2''
+    when replace(upper(df.other_funder),'' '','''') like ''%HHAP3%'' then ''CA-CALICH-HHAP3''
+    when replace(upper(df.other_funder),'' '','''') like ''%HHAP4%'' then ''CA-CALICH-HHAP4''
+    when replace(upper(df.other_funder),'' '','''') like ''%HHAP5%'' then ''CA-HCD-HHAP5''
+    when replace(upper(df.other_funder),'' '','''') like ''%ERF1%'' then ''CA-CALICH-ERF1''
+    when replace(upper(df.other_funder),'' '','''') like ''%ERF2L%'' then ''CA-CALICH-ERF2L''
+    when replace(upper(df.other_funder),'' '','''') like ''%ERF2R%'' then ''CA-CALICH-ERF2R''
+    when replace(upper(df.other_funder),'' '','''') like ''%ERF3L%'' then ''CA-CALICH-ERF3L''
+    when replace(upper(df.other_funder),'' '','''') like ''%ERF4L%'' then ''CA-HCD-ERF4L''
+    when replace(upper(df.other_funder),'' '','''') like ''%ERF3R%'' then ''CA-HCD-ERF3R''
+    when replace(upper(df.other_funder),'' '','''') like ''%FHC%'' then ''CA-CALICH-FHC''
+    when replace(upper(df.other_funder),'' '','''') like ''%BFH%'' then ''CA-CDSS-BFH''
+    when replace(upper(df.other_funder),'' '','''') like ''%HDAP%'' then ''CA-CDSS-HDAP''
+    when replace(upper(df.other_funder),'' '','''') like ''%HSP%'' then ''CA-CDSS-HSP''
+    when replace(upper(df.other_funder),'' '','''') like ''%HOMESAFE%'' then ''CA-CDSS-HomeSafe''
+    when replace(upper(df.other_funder),'' '','''') like ''%CCHHIP%'' then ''CA-CCCCO-CCHHIP''
+    when replace(upper(df.other_funder),'' '','''') like ''%VSSR%'' then ''CA-CALVET-VSSR''
+    when replace(upper(df.other_funder),'' '','''') like ''%BHBH%'' then ''CA-DHCS-BHBH''
+    when replace(upper(dp.project_name),'' '','''') like ''%HOMEKEY%'' then ''CA-HCD-Homekey''
+    when replace(upper(dp.project_name),'' '','''') like ''%MHP%'' then ''CA-HCD-MHP''
+    when replace(upper(dp.project_name),'' '','''') like ''%VHHP%'' then ''CA-HCD-VHHP''
+    when replace(upper(dp.project_name),'' '','''') like ''%HHCII%'' then ''CA-HCD-HHCII''
+    when replace(upper(dp.project_name),'' '','''') like ''%NPLH%'' then ''CA-HCD-NPLH''
+    when replace(upper(dp.project_name),'' '','''') like ''%CA-COUNTY-NPLH%'' then ''CA-County-NPLH''
+    when replace(upper(dp.project_name),'' '','''') like ''%HHAP1%'' then ''CA-HCFC-HHAP1''
+    when replace(upper(dp.project_name),'' '','''') like ''%HHAP2%'' then ''CA-HCFC-HHAP2''
+    when replace(upper(dp.project_name),'' '','''') like ''%HHAP3%'' then ''CA-CALICH-HHAP3''
+    when replace(upper(dp.project_name),'' '','''') like ''%HHAP4%'' then ''CA-CALICH-HHAP4''
+    when replace(upper(dp.project_name),'' '','''') like ''%HHAP5%'' then ''CA-HCD-HHAP5''
+    when replace(upper(dp.project_name),'' '','''') like ''%ERF1%'' then ''CA-CALICH-ERF1''
+    when replace(upper(dp.project_name),'' '','''') like ''%ERF2L%'' then ''CA-CALICH-ERF2L''
+    when replace(upper(dp.project_name),'' '','''') like ''%ERF2R%'' then ''CA-CALICH-ERF2R''
+    when replace(upper(dp.project_name),'' '','''') like ''%ERF3L%'' then ''CA-CALICH-ERF3L''
+    when replace(upper(dp.project_name),'' '','''') like ''%ERF4L%'' then ''CA-HCD-ERF4L''
+    when replace(upper(dp.project_name),'' '','''') like ''%ERF3R%'' then ''CA-HCD-ERF3R''
+    when replace(upper(dp.project_name),'' '','''') like ''%FHC%'' then ''CA-CALICH-FHC''
+    when replace(upper(dp.project_name),'' '','''') like ''%BFH%'' then ''CA-CDSS-BFH''
+    when replace(upper(dp.project_name),'' '','''') like ''%HDAP%'' then ''CA-CDSS-HDAP''
+    when replace(upper(dp.project_name),'' '','''') like ''%HSP%'' then ''CA-CDSS-HSP''
+    when replace(upper(dp.project_name),'' '','''') like ''%HOMESAFE%'' then ''CA-CDSS-HomeSafe''
+    when replace(upper(dp.project_name),'' '','''') like ''%CCHHIP%'' then ''CA-CCCCO-CCHHIP''
+    when replace(upper(dp.project_name),'' '','''') like ''%VSSR%'' then ''CA-CALVET-VSSR''
+    when replace(upper(dp.project_name),'' '','''') like ''%BHBH%'' then ''CA-DHCS-BHBH''
+    end as correct_other_funder
+    ,case when correct_other_funder = ''CA-CALICH-ERF1'' then ''ERF 1''
+      when correct_other_funder = ''CA-CALICH-ERF2L'' then ''ERF 2L''
+      when correct_other_funder = ''CA-CALICH-ERF2R'' then ''ERF 2R''
+      when correct_other_funder = ''CA-CALICH-ERF3L'' then ''ERF 3L''
+      when correct_other_funder = ''CA-HCD-ERF3R'' then ''ERF 3R''
+      when correct_other_funder = ''CA-HCD-ERF4L'' then ''ERF 4L''
+      when correct_other_funder = ''CA-CALICH-FHC'' then ''FHC''
+      when correct_other_funder = ''CA-CALICH-HHAP3'' then ''HHAP 3''
+      when correct_other_funder = ''CA-CALICH-HHAP4'' then ''HHAP 4''
+      when correct_other_funder = ''CA-HCD-HHAP5'' then ''HHAP 5''
+      when correct_other_funder = ''CA-CALVET-VSSR'' then ''VSSR''
+      when correct_other_funder = ''CA-CCCCO-CCHHIP'' then ''CCHHIP''
+      when correct_other_funder = ''CA-CDSS-BFH'' then ''BFH''
+      when correct_other_funder = ''CA-CDSS-HDAP'' then ''HDAP''
+      when correct_other_funder = ''CA-CDSS-HSP'' then ''HSP''
+      when correct_other_funder = ''CA-CDSS-HomeSafe'' then ''HomeSafe''
+      when correct_other_funder = ''CA-County-NPLH'' then ''County NPLH''
+      when correct_other_funder = ''CA-HCD-HHCII'' then ''HHCII''
+      when correct_other_funder = ''CA-HCD-Homekey'' then ''Homekey''
+      when correct_other_funder = ''CA-HCD-MHP'' then ''MHP''
+      when correct_other_funder = ''CA-HCD-NPLH'' then ''HCD NPLH''
+      when correct_other_funder = ''CA-HCD-VHHP'' then ''VHHP''
+      when correct_other_funder = ''CA-HCFC-HHAP1'' then ''HHAP 1''
+      when correct_other_funder = ''CA-HCFC-HHAP2'' then ''HHAP 2''
+      when correct_other_funder = ''CA-DHCS-BHBH'' then ''BHBH''
+      end as Program
+    ,case when (ltrim(rtrim(replace(upper(df.other_funder), '' '', ''''))) like ''%HOMEKEY%'' or 
+            ltrim(rtrim(replace(upper(df.other_funder), '' '', ''''))) like ''%MHP%'' or 
+            ltrim(rtrim(replace(upper(df.other_funder), '' '', ''''))) like ''%VHHP%'' or 
+            ltrim(rtrim(replace(upper(df.other_funder), '' '', ''''))) like ''%HHCII%'' or 
+            ltrim(rtrim(replace(upper(df.other_funder), '' '', ''''))) like ''%NPLH%'' or 
+            ltrim(rtrim(replace(upper(df.other_funder), '' '', ''''))) like ''%CA-COUNTY-NPLH%'' or 
+            ltrim(rtrim(replace(upper(df.other_funder), '' '', ''''))) like ''%HHAP1%'' or 
+            ltrim(rtrim(replace(upper(df.other_funder), '' '', ''''))) like ''%HHAP2%'' or 
+            ltrim(rtrim(replace(upper(df.other_funder), '' '', ''''))) like ''%HHAP3%'' or 
+            ltrim(rtrim(replace(upper(df.other_funder), '' '', ''''))) like ''%HHAP4%'' or 
+            ltrim(rtrim(replace(upper(df.other_funder), '' '', ''''))) like ''%HHAP5%'' or 
+            ltrim(rtrim(replace(upper(df.other_funder), '' '', ''''))) like ''%ERF1%'' or 
+            ltrim(rtrim(replace(upper(df.other_funder), '' '', ''''))) like ''%ERF2L%'' or 
+            ltrim(rtrim(replace(upper(df.other_funder), '' '', ''''))) like ''%ERF2R%'' or 
+            ltrim(rtrim(replace(upper(df.other_funder), '' '', ''''))) like ''%ERF3L%'' or 
+            ltrim(rtrim(replace(upper(df.other_funder), '' '', ''''))) like ''%ERF3R%'' or 
+            ltrim(rtrim(replace(upper(df.other_funder), '' '', ''''))) like ''%ERF4L%'' or 
+            ltrim(rtrim(replace(upper(df.other_funder), '' '', ''''))) like ''%FHC%'' or 
+            ltrim(rtrim(replace(upper(df.other_funder), '' '', ''''))) like ''%BFH%'' or 
+            ltrim(rtrim(replace(upper(df.other_funder), '' '', ''''))) like ''%HDAP%'' or 
+            ltrim(rtrim(replace(upper(df.other_funder), '' '', ''''))) like ''%HSP%'' or 
+            ltrim(rtrim(replace(upper(df.other_funder), '' '', ''''))) like ''%HOMESAFE%'' or 
+            ltrim(rtrim(replace(upper(df.other_funder), '' '', ''''))) like ''%CCHHIP%'' or 
+            ltrim(rtrim(replace(upper(df.other_funder), '' '', ''''))) like ''%VSSR%'' or 
+            ltrim(rtrim(replace(upper(df.other_funder), '' '', ''''))) like ''%BHBH%'' )
+            and ltrim(rtrim(replace(upper(df.other_funder), '' '', ''''))) not in (''CA-HCD-HOMEKEY'', ''CA-HCD-MHP'', ''CA-HCD-VHHP'', ''CA-HCD-HHCII'',''CA-HCD-NPLH'', 
+            ''CA-COUNTY-NPLH'', ''CA-HCFC-HHAP1'', ''CA-HCFC-HHAP2'', ''CA-CALICH-HHAP3'', ''CA-CALICH-HHAP4'', 
+            ''CA-HCD-HHAP5'', ''CA-CALICH-ERF1'', ''CA-CALICH-ERF2L'', ''CA-CALICH-ERF2R'', ''CA-CALICH-ERF3L'', 
+            ''CA-HCD-ERF3R'', ''CA-HCD-ERF4L'', ''CA-CALICH-FHC'', ''CA-CDSS-BFH'', ''CA-CDSS-HDAP'', ''CA-CDSS-HSP'', 
+            ''CA-CDSS-HOMESAFE'', ''CA-CCCCO-CCHHIP'', ''CA-CALVET-VSSR'', ''CA-DHCS-BHBH'')
+            then 1 else 0 end as fuzzy_funder_ind
+    ,case 
+        when ltrim(rtrim(replace(upper(df.other_funder), '' '', ''''))) not in (
+            ''CA-HCD-HOMEKEY'', ''CA-HCD-MHP'', ''CA-HCD-VHHP'', ''CA-HCD-HHCII'', ''CA-HCD-NPLH'', 
+            ''CA-COUNTY-NPLH'', ''CA-HCFC-HHAP1'', ''CA-HCFC-HHAP2'', ''CA-CALICH-HHAP3'', ''CA-CALICH-HHAP4'', 
+            ''CA-HCD-HHAP5'', ''CA-CALICH-ERF1'', ''CA-CALICH-ERF2L'', ''CA-CALICH-ERF2R'', ''CA-CALICH-ERF3L'', 
+            ''CA-HCD-ERF3R'', ''CA-HCD-ERF4L'', ''CA-CALICH-FHC'', ''CA-CDSS-BFH'', ''CA-CDSS-HDAP'', ''CA-CDSS-HSP'', 
+            ''CA-CDSS-HOMESAFE'', ''CA-CCCCO-CCHHIP'', ''CA-CALVET-VSSR'', ''CA-DHCS-BHBH''
+        ) 
+        and (
+            replace(upper(dp.project_name), '' '', '''') like ''%HOMEKEY%'' or 
+            replace(upper(dp.project_name), '' '', '''') like ''%MHP%'' or 
+            replace(upper(dp.project_name), '' '', '''') like ''%VHHP%'' or 
+            replace(upper(dp.project_name), '' '', '''') like ''%HHCII%'' or 
+            replace(upper(dp.project_name), '' '', '''') like ''%NPLH%'' or 
+            replace(upper(dp.project_name), '' '', '''') like ''%CA-COUNTY-NPLH%'' or 
+            replace(upper(dp.project_name), '' '', '''') like ''%HHAP1%'' or 
+            replace(upper(dp.project_name), '' '', '''') like ''%HHAP2%'' or 
+            replace(upper(dp.project_name), '' '', '''') like ''%HHAP3%'' or 
+            replace(upper(dp.project_name), '' '', '''') like ''%HHAP4%'' or 
+            replace(upper(dp.project_name), '' '', '''') like ''%HHAP5%'' or 
+            replace(upper(dp.project_name), '' '', '''') like ''%ERF1%'' or 
+            replace(upper(dp.project_name), '' '', '''') like ''%ERF2L%'' or 
+            replace(upper(dp.project_name), '' '', '''') like ''%ERF2R%'' or 
+            replace(upper(dp.project_name), '' '', '''') like ''%ERF3L%'' or 
+            replace(upper(dp.project_name), '' '', '''') like ''%ERF3R%'' or 
+            replace(upper(dp.project_name), '' '', '''') like ''%ERF4L%'' or 
+            replace(upper(dp.project_name), '' '', '''') like ''%FHC%'' or 
+            replace(upper(dp.project_name), '' '', '''') like ''%BFH%'' or 
+            replace(upper(dp.project_name), '' '', '''') like ''%HDAP%'' or 
+            replace(upper(dp.project_name), '' '', '''') like ''%HSP%'' or 
+            replace(upper(dp.project_name), '' '', '''') like ''%HOMESAFE%'' or 
+            replace(upper(dp.project_name), '' '', '''') like ''%CCHHIP%'' or 
+            replace(upper(dp.project_name), '' '', '''') like ''%VSSR%'' or 
+            replace(upper(dp.project_name), '' '', '''') like ''%BHBH%''
+         ) and fuzzy_funder_ind <> 1 then 1
+        else 0 
+    end as fuzzy_project_ind
+    ,case when fuzzy_project_ind = 1 then ''PROJECT_NAME''
+          when fuzzy_funder_ind = 1 then ''OTHER_FUNDER''
+          end as fuzzy_column_name
+    ,case when fuzzy_project_ind = 1 then dp.project_name
+          when fuzzy_funder_ind = 1 then df.other_funder 
+          end as fuzzy_column_value
+from hdis_prod.edw.fact_enroll fe 
+join hdis_prod.edw.dim_funder df on df.project_sk = fe.project_sk
+left join hdis_prod.edw.dim_project dp on df.project_sk = dp.project_sk
+join ab977programs sbx on sbx.other_funder = correct_other_funder
+join hdis_prod.edw.dim_coc dc on fe.coc_sk = dc.coc_sk
+join quarterranges qr ON (date(fe.entry_date) <= date(qr.quarterend)) AND (date(fe.exit_date) >= date(qr.quarterstart) OR date(fe.exit_date) IS NULL)
+
+where (((date(fe.exit_date) IS NULL OR date(fe.exit_date) > date(df.start_date)) AND (date(fe.entry_date) < date(df.end_date)) AND date(df.end_date) IS NOT NULL) OR ((date(fe.exit_date) IS NULL OR date(fe.exit_date) > date(df.start_date)) AND date(df.end_date) IS NULL)) AND (date(fe.entry_date) <= (SELECT LAST_SUBMISSION_DATE FROM HDIS_PROD.EDW.SUBMISSION_DATE)) AND (date(fe.exit_date) >= ''2023-01-01'' OR (date(fe.exit_date) IS NULL)) and client_sk <> ''-2'' and
+(fuzzy_funder_ind = 1 or fuzzy_project_ind = 1) and
+project_id not in (
+
+select distinct project_id from hdis_prod.edw.dim_project dp
+left join hdis_prod.edw.dim_funder df on dp.project_sk = df.project_sk
+where other_funder in (
+            ''CA-HCD-HOMEKEY'', ''CA-HCD-MHP'', ''CA-HCD-VHHP'', ''CA-HCD-HHCII'', ''CA-HCD-NPLH'', 
+            ''CA-COUNTY-NPLH'', ''CA-HCFC-HHAP1'', ''CA-HCFC-HHAP2'', ''CA-CALICH-HHAP3'', ''CA-CALICH-HHAP4'', 
+            ''CA-HCD-HHAP5'', ''CA-CALICH-ERF1'', ''CA-CALICH-ERF2L'', ''CA-CALICH-ERF2R'', ''CA-CALICH-ERF3L'', 
+            ''CA-HCD-ERF3R'', ''CA-HCD-ERF4L'', ''CA-CALICH-FHC'', ''CA-CDSS-BFH'', ''CA-CDSS-HDAP'', ''CA-CDSS-HSP'', 
+            ''CA-CDSS-HOMESAFE'', ''CA-CCCCO-CCHHIP'', ''CA-CALVET-VSSR'', ''CA-DHCS-BHBH''
+        ) order by project_id ))
+
+select 
+correct_other_funder
+,fuzzy_column_name
+,fuzzy_column_value
+,program
+,dept
+,coc_dashboard_name
+,project_id
+,grant_id
+,project_sk
+,project_name
+,organization_id
+,organization_name
+,project_type
+,start_date
+,end_date
+,client_sk
+,exit_date
+,active_ind
+,active_quarter
+,current_date() as date_loaded
+from fuzzy_match
+;
+
+-- Return message to confirm that the table has been refreshed
+RETURN ''Target tables refreshed successfully.'';
+END;
+';

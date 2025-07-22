@@ -1,0 +1,852 @@
+CREATE OR REPLACE PROCEDURE HDIS_SBX.SBX_LOREN_HARDY.REFRESH_DQ_SUMMARY_QA()
+RETURNS VARCHAR
+LANGUAGE SQL
+EXECUTE AS OWNER
+AS '
+BEGIN
+
+
+--Truncate DQ Summary
+TRUNCATE TABLE dq_summary_qa;
+
+--Insert new data into the DQ Summary table from query
+INSERT INTO dq_summary_qa (filename, dataelement, pstg_row_id, source_file, project_type_name, funder_name, organization_name, other_funder, project_name_and_id, error_1, error_2, error_3, quarter_year, funder, report_date, date_loaded, PRIORITIZATION)
+with enrollment as (
+select distinct enrollment_id, source_file, personal_id, project_id, pstg_row_id, disabling_condition, entry_date, stg_md5_hash_value, relationship_to_hoh, living_situation, length_of_stay from hdis_dev.staging.pstg_enrollment where 
+coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP) >= DATEADD(YEAR, - 1, DATE_TRUNC(''quarter'', DATEADD(''quarter'', - 4, CURRENT_DATE))) AND (YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)) < YEAR(CURRENT_DATE) OR (YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)) = YEAR(CURRENT_DATE) AND QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)) <= QUARTER(CURRENT_DATE)))
+),
+report_date as (
+select source_file, max(to_date(date_loaded)) as report_date from hdis_dev.staging.error_tbl_2
+group by source_file
+),
+error_tbl as (
+select a.*, PRIORITIZATION from hdis_dev.staging.error_tbl_2 a
+join HDIS_DEV.STAGING.CTRL_VALIDATION b on a.query_name = b.query_name
+ where error_date_value >= DATEADD(YEAR, - 1, DATE_TRUNC(''quarter'', DATEADD(''quarter'', - 4, CURRENT_DATE))) AND (YEAR(error_date_value) < YEAR(CURRENT_DATE) OR (YEAR(error_date_value) = YEAR(CURRENT_DATE) AND QUARTER(error_date_value) <= QUARTER(CURRENT_DATE)))
+),
+base as (
+SELECT ''INVENTORY.CSV'' as fileName
+        ,''ALL'' as DataElement
+        ,a.pstg_row_id
+        ,a.project_id
+        ,b.organization_id
+        ,a.source_file
+        ,b.project_type
+        ,b.project_name||''|''||b.project_id project_name_and_id
+        ,rd.report_date
+		,NULL Error_1
+        ,NULL Error_2
+        ,case when c.business_key_value is not null then ''Error'' end as Error_3
+		,CONCAT (YEAR(coalesce(try_to_date(inventory_end_date), CURRENT_TIMESTAMP)),'' Q'',
+            QUARTER(coalesce(try_to_date(inventory_end_date), CURRENT_TIMESTAMP))) AS quarter_year 
+		,current_date() as date_loaded, PRIORITIZATION
+	FROM hdis_dev.staging.pstg_inventory a
+    JOIN report_date rd on rd.source_file = a.source_file
+    LEFT JOIN hdis_dev.staging.pstg_project b on a.project_id = b.project_id and a.source_file = b.source_file
+	LEFT JOIN error_tbl c ON coalesce(A.INVENTORY_ID||''|''||A.PROJECT_ID||''|''||A.COC_CODE||''|''||A.HOUSEHOLD_TYPE,a.stg_md5_hash_value) = c.business_key_value and a.source_file = c.source_file and c.table_name like ''PSTG_INVENTORY'' and c.query_name not in (''INVENTORY_1'', ''INVENTORY_7'', ''INVENTORY_8'', ''INVENTORY_9'', ''INVENTORY_10'', ''INVENTORY_21'', ''INVENTORY_22'', ''INVENTORY_23'', ''INVENTORY_24'', ''INVENTORY_38'', ''INVENTORY_39'', ''INVENTORY_45'', ''INVENTORY_46'', ''INVENTORY_47'', ''INVENTORY_48'', ''INVENTORY_49'')
+	WHERE coalesce(try_to_date(inventory_end_date), CURRENT_TIMESTAMP) >= DATEADD(YEAR, - 1, DATE_TRUNC(''quarter'', DATEADD(''quarter'', - 4, CURRENT_DATE))) AND (YEAR(coalesce(try_to_date(inventory_end_date), CURRENT_TIMESTAMP)) < YEAR(CURRENT_DATE) OR (YEAR(coalesce(try_to_date(inventory_end_date), CURRENT_TIMESTAMP)) = YEAR(CURRENT_DATE) AND QUARTER(coalesce(try_to_date(inventory_end_date), CURRENT_TIMESTAMP)) <= QUARTER(CURRENT_DATE))) 
+    
+UNION ALL
+
+SELECT ''ORGANIZATION.CSV'' fileName
+		,''ALL'' DataElement
+        ,a.pstg_row_id
+        ,b.project_id
+        ,b.organization_id
+        ,a.source_file
+        ,b.project_type
+        ,b.project_name||''|''||b.project_id project_name_and_id
+        ,rd.report_date
+        ,NULL Error_1
+        ,NULL Error_2
+        ,case when c.business_key_value is not null then ''Error'' end as Error_3
+		,CONCAT (
+            YEAR(coalesce(try_to_date(operating_end_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(operating_end_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+		,current_date() as date_loaded, PRIORITIZATION
+	FROM hdis_dev.staging.pstg_organization a
+    JOIN report_date rd on rd.source_file = a.source_file
+    LEFT JOIN hdis_dev.staging.pstg_project b on a.organization_id = b.organization_id and a.source_file = b.source_file
+	LEFT JOIN error_tbl c ON coalesce(a.organization_id,a.stg_md5_hash_value) = c.business_key_value and a.source_file = c.source_file and c.table_name like ''PSTG_ORGANIZATION'' and c.query_name NOT IN (''ORGANIZATION_1'', ''ORGANIZATION_2'', ''ORGANIZATION_3'', ''ORGANIZATION_4'', ''ORGANIZATION_12'', ''ORGANIZATION_13'', ''ORGANIZATION_14'', ''ORGANIZATION_16'', ''ORGANIZATION_17'', ''ORGANIZATION_18'', ''ORGANIZATION_20'') 
+	WHERE coalesce(try_to_date(operating_end_date), CURRENT_TIMESTAMP) >= DATEADD(YEAR, - 1, DATE_TRUNC(''quarter'', DATEADD(''quarter'', - 4, CURRENT_DATE))) AND (YEAR(coalesce(try_to_date(operating_end_date), CURRENT_TIMESTAMP)) < YEAR(CURRENT_DATE) OR (YEAR(coalesce(try_to_date(operating_end_date), CURRENT_TIMESTAMP)) = YEAR(CURRENT_DATE) AND QUARTER(coalesce(try_to_date(operating_end_date), CURRENT_TIMESTAMP)) <= QUARTER(CURRENT_DATE))) 
+
+UNION ALL
+
+	SELECT ''PROJECT.CSV'' fileName
+		,''ALL'' DataElement
+        ,a.pstg_row_id
+        ,a.project_id
+        ,a.organization_id
+        ,a.source_file
+        ,a.project_type
+        ,a.project_name||''|''||a.project_id project_name_and_id
+        ,rd.report_date
+        ,NULL Error_1
+        ,NULL Error_2
+        ,case when b.business_key_value is not null then ''Error'' end as Error_3
+		,CONCAT (
+            YEAR(coalesce(try_to_date(operating_end_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(operating_end_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+		,current_date() as date_loaded, PRIORITIZATION
+	FROM hdis_dev.staging.pstg_project a
+    JOIN report_date rd on rd.source_file = a.source_file
+	LEFT JOIN error_tbl B ON coalesce(a.project_id,a.stg_md5_hash_value) = B.business_key_value and a.source_file = b.source_file and b.table_name like ''PSTG_PROJECT'' and b.query_name not in (''PROJECT_28'', ''PROJECT_39'', ''PROJECT_10'', ''PROJECT_40'', ''PROJECT_7'', ''PROJECT_41'', ''PROJECT_29'', ''PROJECT_6'', ''PROJECT_5'', ''PROJECT_30'', ''PROJECT_43'', ''PROJECT_44'') 
+	WHERE coalesce(try_to_date(operating_end_date), CURRENT_TIMESTAMP) >= DATEADD(YEAR, - 1, DATE_TRUNC(''quarter'', DATEADD(''quarter'', - 4, CURRENT_DATE))) AND (YEAR(coalesce(try_to_date(operating_end_date), CURRENT_TIMESTAMP)) < YEAR(CURRENT_DATE) OR (YEAR(coalesce(try_to_date(operating_end_date), CURRENT_TIMESTAMP)) = YEAR(CURRENT_DATE) AND QUARTER(coalesce(try_to_date(operating_end_date), CURRENT_TIMESTAMP)) <= QUARTER(CURRENT_DATE))) 
+
+UNION ALL
+
+ 	SELECT ''PROJECTCOC.CSV'' fileName
+		,''ALL'' DataElement
+        ,a.pstg_row_id
+        ,d.project_id
+        ,d.organization_id
+        ,a.source_file
+        ,d.project_type
+        ,d.project_name||''|''||d.project_id project_name_and_id
+        ,rd.report_date
+        ,case when geography_type = 99 then ''RecCount99'' end as Error_1
+        ,NULL Error_2
+        ,case when c.business_key_value is not null then ''Error'' end as Error_3
+		,CONCAT (
+            YEAR(coalesce(try_to_date(d.operating_end_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(d.operating_end_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+		,current_date() as date_loaded, PRIORITIZATION
+	FROM hdis_dev.staging.pstg_project_coc a
+    JOIN report_date rd on rd.source_file = a.source_file
+	LEFT JOIN hdis_dev.staging.pstg_project d ON a.project_id = d.project_id and a.source_file = d.source_file
+	LEFT JOIN error_tbl C ON coalesce(a.project_coc_id||''|''||a.project_id,a.stg_md5_hash_value) = c.business_key_value and a.source_file = c.source_file and c.table_name like ''PSTG_PROJECT_COC'' and c.query_name NOT IN (''PROJECT_COC_1'', ''PROJECT_COC_11'', ''PROJECT_COC_13'', ''PROJECT_COC_10'', ''PROJECT_COC_12'', ''PROJECT_COC_28'', ''PROJECT_COC_29'', ''PROJECT_COC_4'', ''PROJECT_COC_25'', ''PROJECT_COC_5'', ''PROJECT_COC_26'', ''PROJECT_COC_27'', ''PROJECT_COC_6'', ''PROJECT_COC_22'', ''PROJECT_COC_23'', ''PROJECT_COC_7'')
+	WHERE coalesce(try_to_date(d.operating_end_date), CURRENT_TIMESTAMP) >= DATEADD(YEAR, - 1, DATE_TRUNC(''quarter'', DATEADD(''quarter'', - 4, CURRENT_DATE))) AND (YEAR(coalesce(try_to_date(d.operating_end_date), CURRENT_TIMESTAMP)) < YEAR(CURRENT_DATE) OR (YEAR(coalesce(try_to_date(d.operating_end_date), CURRENT_TIMESTAMP)) = YEAR(CURRENT_DATE) AND QUARTER(coalesce(try_to_date(d.operating_end_date), CURRENT_TIMESTAMP)) <= QUARTER(CURRENT_DATE))) 
+
+UNION ALL
+
+SELECT ''FUNDER.CSV'' fileName
+		,''ALL'' DataElement
+        ,a.pstg_row_id
+        ,a.project_id
+        ,c.organization_id
+        ,a.source_file
+        ,c.project_type 
+        ,c.project_name||''|''||c.project_id project_name_and_id
+        ,rd.report_date
+        ,NULL Error_1
+        ,NULL Error_2
+        ,case when b.business_key_value is not null then ''Error'' end as Error_3
+		,CONCAT (
+            YEAR(CASE WHEN try_to_date(end_date) IS NULL AND try_to_date(start_date) IS NULL THEN try_to_date(a.date_updated) WHEN try_to_date(end_date) IS NULL             THEN try_to_date(start_date) ELSE try_to_date(end_date) END),
+            '' Q'',
+            QUARTER(CASE WHEN try_to_date(end_date) IS NULL AND try_to_date(start_date) IS NULL THEN try_to_date(a.date_updated) WHEN try_to_date(end_date) IS               NULL THEN try_to_date(start_date) ELSE try_to_date(end_date) END)
+			) AS quarter_year
+		,current_date() as date_loaded, PRIORITIZATION
+	FROM hdis_dev.staging.pstg_funder a
+    JOIN report_date rd on rd.source_file = a.source_file
+    LEFT JOIN hdis_dev.staging.pstg_project c on a.project_id = c.project_id and a.source_file = c.source_file
+	LEFT JOIN error_tbl b ON coalesce(a.funder_id||''|''||a.project_id,a.stg_md5_hash_value)= b.business_key_value and a.source_file = b.source_file and b.table_name like ''PSTG_FUNDER'' and b.query_name NOT IN (''FUNDER_42'', ''FUNDER_44'', ''FUNDER_57'', ''FUNDER_58'', ''FUNDER_43'', ''FUNDER_45'', ''FUNDER_1'', ''FUNDER_54'', ''FUNDER_6'', ''FUNDER_7'', ''FUNDER_55'', ''FUNDER_56'', ''FUNDER_8'', ''FUNDER_49'', ''FUNDER_9'', ''FUNDER_50'', ''FUNDER_2'') 
+	WHERE (CASE WHEN try_to_date(end_date) IS NULL AND try_to_date(start_date) IS NULL THEN try_to_date(a.date_updated) WHEN try_to_date(end_date) IS NULL THEN try_to_date(start_date) ELSE try_to_date(end_date) END) >= DATEADD(YEAR, - 1, DATE_TRUNC(''quarter'', DATEADD(''quarter'', - 4, CURRENT_DATE))) AND (YEAR(CASE WHEN try_to_date(end_date) IS NULL AND try_to_date(start_date) IS NULL THEN try_to_date(a.date_updated) WHEN try_to_date(end_date) IS NULL THEN try_to_date(start_date) ELSE try_to_date(end_date) END) < YEAR(CURRENT_DATE) OR (YEAR(CASE WHEN try_to_date(end_date) IS NULL AND try_to_date(start_date) IS NULL THEN try_to_date(a.date_updated) WHEN try_to_date(end_date) IS NULL THEN try_to_date(start_date) ELSE try_to_date(end_date) END) = YEAR(CURRENT_DATE) AND QUARTER(CASE WHEN try_to_date(end_date) IS NULL AND try_to_date(start_date) IS NULL THEN try_to_date(a.date_updated) WHEN try_to_date(end_date) IS NULL THEN try_to_date(start_date) ELSE try_to_date(end_date) END) <= QUARTER(CURRENT_DATE)))
+
+UNION ALL
+
+	SELECT ''CLIENT.CSV'' fileName
+        ,''DOB'' DataElement
+        ,a.pstg_row_id
+        ,d.project_id
+        ,c.organization_id
+        ,a.source_file
+        ,c.project_type
+        ,c.project_name||''|''||c.project_id project_name_and_id
+        ,rd.report_date
+        ,case when a.dob_data_quality = 99
+                   then ''RecCount99''
+                   end as Error_1
+        ,case when a.dob_data_quality in (8,9)
+                   then ''RecCount89''
+              end as Error_2
+        ,case when b.business_key_value is not null then ''Error'' end as Error_3
+		,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+		,current_date() as date_loaded, PRIORITIZATION
+	FROM hdis_dev.staging.pstg_client a
+    JOIN report_date rd on rd.source_file = a.source_file
+	JOIN enrollment d ON a.personal_id = d.personal_id and a.source_file = d.source_file
+    LEFT JOIN hdis_dev.staging.pstg_project c on d.project_id = c.project_id and d.source_file = c.source_file
+	LEFT JOIN error_tbl b ON b.business_key_value = coalesce(a.personal_id,a.stg_md5_hash_value) and b.source_file = 
+    a.source_file and b.query_name in (''CLIENT_125'', ''CLIENT_126'', ''CLIENT_120'')
+
+UNION ALL
+
+	SELECT ''CLIENT.CSV'' fileName
+        ,''SSN'' DataElement
+        ,a.pstg_row_id
+        ,d.project_id
+        ,c.organization_id
+        ,a.source_file
+        ,c.project_type
+        ,c.project_name||''|''||c.project_id project_name_and_id
+        ,rd.report_date
+        ,case when a.ssn_data_quality = 99
+                   then ''RecCount99''
+                   end as Error_1
+        ,case when a.ssn_data_quality in (8,9)
+                   then ''RecCount89''
+              end as Error_2
+        ,case when b.business_key_value is not null then ''Error'' end as Error_3
+		,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+		,current_date() as date_loaded, PRIORITIZATION
+	FROM hdis_dev.staging.pstg_client a
+    JOIN report_date rd on rd.source_file = a.source_file
+	JOIN enrollment d ON a.personal_id = d.personal_id and a.source_file = d.source_file
+    LEFT JOIN hdis_dev.staging.pstg_project c on d.project_id = c.project_id and d.source_file = c.source_file
+	LEFT JOIN error_tbl b ON b.business_key_value = coalesce(a.personal_id,a.stg_md5_hash_value) and b.source_file = 
+    a.source_file and b.query_name in (''CLIENT_54'', ''CLIENT_2'')
+
+UNION ALL
+
+	SELECT ''CLIENT.CSV'' fileName
+        ,''NAME'' DataElement
+        ,a.pstg_row_id
+        ,d.project_id
+        ,c.organization_id
+        ,a.source_file
+        ,c.project_type
+        ,c.project_name||''|''||c.project_id project_name_and_id
+        ,rd.report_date
+        ,case when a.name_data_quality = 99
+                   then ''RecCount99''
+                   end as Error_1
+        ,case when a.name_data_quality in (8,9)
+                   then ''RecCount89''
+              end as Error_2
+        ,case when b.business_key_value is not null then ''Error'' end as Error_3
+		,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+		,current_date() as date_loaded, PRIORITIZATION
+	FROM hdis_dev.staging.pstg_client a
+    JOIN report_date rd on rd.source_file = a.source_file
+	JOIN enrollment d ON a.personal_id = d.personal_id and a.source_file = d.source_file
+    LEFT JOIN hdis_dev.staging.pstg_project c on d.project_id = c.project_id and d.source_file = c.source_file
+	LEFT JOIN error_tbl b ON b.business_key_value = coalesce(a.personal_id,a.stg_md5_hash_value) and b.source_file = 
+    a.source_file and b.query_name in (''CLIENT_50'', ''CLIENT_51'', ''CLIENT_52'', ''CLIENT_27'')
+
+UNION ALL
+
+	SELECT ''CLIENT.CSV'' fileName
+        ,''Race/Ethnicity'' DataElement
+        ,a.pstg_row_id
+        ,d.project_id
+        ,c.organization_id
+        ,a.source_file
+        ,c.project_type
+        ,c.project_name||''|''||c.project_id project_name_and_id
+        ,rd.report_date
+        ,case when a.race_none = 99
+                   then ''RecCount99''
+              end as Error_1
+        ,case when a.race_none in (8,9) then ''RecCount89'' end as Error_2
+        ,case when b.business_key_value is not null then ''Error'' end as Error_3
+		,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+		,current_date() as date_loaded, PRIORITIZATION
+	FROM hdis_dev.staging.pstg_client a
+    JOIN report_date rd on rd.source_file = a.source_file
+	JOIN enrollment d ON a.personal_id = d.personal_id and a.source_file = d.source_file
+    LEFT JOIN hdis_dev.staging.pstg_project c on d.project_id = c.project_id and d.source_file = c.source_file
+	LEFT JOIN error_tbl b ON b.business_key_value = coalesce(a.personal_id,a.stg_md5_hash_value) and b.source_file = a.source_file and b.query_name in (''CLIENT_5'', ''CLIENT_57'', ''CLIENT_47'', ''CLIENT_60'', ''CLIENT_48'', ''CLIENT_61'',''CLIENT_63'', ''CLIENT_9'', ''CLIENT_63'', ''CLIENT_59'', ''CLIENT_7'', ''CLIENT_10'', ''CLIENT_64'', ''CLIENT_6'', ''CLIENT_58'', ''CLIENT_8'', ''CLIENT_62'')
+
+UNION ALL
+
+	SELECT ''CLIENT.CSV'' fileName
+        ,''Gender'' DataElement
+        ,a.pstg_row_id
+        ,d.project_id
+        ,c.organization_id
+        ,a.source_file
+        ,c.project_type
+        ,c.project_name||''|''||c.project_id project_name_and_id
+        ,rd.report_date
+        ,case when a.gender_none = 99 
+                   then ''RecCount99''
+              end as Error_1
+        ,case when a.gender_none in (8,9) then ''RecCount89'' end as Error_2
+        ,case when b.business_key_value is not null then ''Error'' end as Error_3
+		,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+		,current_date() as date_loaded, PRIORITIZATION
+	FROM hdis_dev.staging.pstg_client a
+    JOIN report_date rd on rd.source_file = a.source_file
+	JOIN enrollment d ON a.personal_id = d.personal_id and a.source_file = d.source_file
+    LEFT JOIN hdis_dev.staging.pstg_project c on d.project_id = c.project_id and d.source_file = c.source_file
+	LEFT JOIN error_tbl b ON b.business_key_value = coalesce(a.personal_id,a.stg_md5_hash_value) and b.source_file = 
+    a.source_file and b.query_name in (''CLIENT_11'', ''CLIENT_66'', ''CLIENT_12'', ''CLIENT_67'', ''CLIENT_13'',''CLIENT_68'', ''CLIENT_24'', ''CLIENT_69'',''CLIENT_70'', ''CLIENT_14'',''CLIENT_71'', ''CLIENT_15'', ''CLIENT_72'', ''CLIENT_25'', ''CLIENT_16'',''CLIENT_73'')
+
+UNION ALL
+
+	SELECT ''CLIENT.CSV'' fileName
+        ,''Veteran Status'' DataElement
+        ,a.pstg_row_id
+        ,d.project_id
+        ,c.organization_id
+        ,a.source_file
+        ,c.project_type
+        ,c.project_name||''|''||c.project_id project_name_and_id
+        ,rd.report_date
+        ,case when a.veteran_status = 99
+                   then ''RecCount99''
+                   end as Error_1
+        ,case when a.veteran_status in (8,9)
+                   then ''RecCount89''
+              end as Error_2
+        ,case when b.business_key_value is not null then ''Error'' end as Error_3
+		,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+		,current_date() as date_loaded, PRIORITIZATION
+	FROM hdis_dev.staging.pstg_client a
+    JOIN report_date rd on rd.source_file = a.source_file
+	JOIN enrollment d ON a.personal_id = d.personal_id and a.source_file = d.source_file
+    LEFT JOIN hdis_dev.staging.pstg_project c on d.project_id = c.project_id and d.source_file = c.source_file
+	LEFT JOIN error_tbl b ON b.business_key_value = coalesce(a.personal_id,a.stg_md5_hash_value) and b.source_file = 
+    a.source_file and b.query_name in (''CLIENT_109'', ''CLIENT_17'', ''CLIENT_45'', ''CLIENT_75'')
+
+UNION ALL
+
+	SELECT ''ENROLLMENT.CSV'' fileName
+        ,''Disabling Condition'' DataElement
+        ,a.pstg_row_id
+        ,a.project_id
+        ,c.organization_id
+        ,a.source_file
+        ,c.project_type
+        ,c.project_name||''|''||c.project_id project_name_and_id
+        ,rd.report_date
+        ,case when a.disabling_condition = 99 
+                   then ''RecCount99''
+                   end as Error_1
+        ,case when a.disabling_condition in (8,9) 
+                   then ''RecCount89''
+                   end as Error_2
+        ,case when b.business_key_value is not null then ''Error'' end as Error_3
+		,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+		,current_date() as date_loaded, PRIORITIZATION
+	FROM enrollment a
+    JOIN report_date rd on rd.source_file = a.source_file
+    LEFT JOIN hdis_dev.staging.pstg_project c on a.project_id = c.project_id and a.source_file = c.source_file 
+	LEFT JOIN error_tbl b ON coalesce(a.enrollment_id,a.stg_md5_hash_value)= b.business_key_value and a.source_file = b.source_file and b.query_name in (''ENROLLMENT_6'', ''ENROLLMENT_34'', ''ENROLLMENT_86'')
+
+UNION ALL
+
+	SELECT ''ENROLLMENT.CSV'' fileName
+        ,''Relationship to HoH'' DataElement
+        ,a.pstg_row_id
+        ,a.project_id
+        ,c.organization_id
+        ,a.source_file
+        ,c.project_type
+        ,c.project_name||''|''||c.project_id project_name_and_id
+        ,rd.report_date
+        ,case when a.relationship_to_hoh = 99 
+                   then ''RecCount99''
+                   end as Error_1
+        ,case when a.relationship_to_hoh in (8,9) 
+                   then ''RecCount89''
+                   end as Error_2
+        ,case when b.business_key_value is not null then ''Error'' end as Error_3
+		,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+		,current_date() as date_loaded, PRIORITIZATION
+	FROM enrollment a
+    JOIN report_date rd on rd.source_file = a.source_file
+    LEFT JOIN hdis_dev.staging.pstg_project c on a.project_id = c.project_id and a.source_file = c.source_file 
+	LEFT JOIN error_tbl b ON coalesce(a.enrollment_id,a.stg_md5_hash_value)= b.business_key_value and a.source_file = b.source_file and b.query_name in (''ENROLLMENT_27'', ''ENROLLMENT_79'', ''ENROLLMENT_163'', ''ENROLLMENT_164'', ''ENROLLMENT_5'')
+
+UNION ALL
+
+	SELECT ''ENROLLMENT.CSV'' fileName
+        ,''Living Situation'' DataElement
+        ,a.pstg_row_id
+        ,a.project_id
+        ,c.organization_id
+        ,a.source_file
+        ,c.project_type
+        ,c.project_name||''|''||c.project_id project_name_and_id
+        ,rd.report_date
+        ,case when a.living_situation = 99 
+                   then ''RecCount99''
+                   end as Error_1
+        ,case  when a.living_situation in (8,9) 
+                   then ''RecCount89''
+                   end as Error_2
+        ,case when b.business_key_value is not null then ''Error'' end as Error_3
+		,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+		,current_date() as date_loaded, PRIORITIZATION
+	FROM enrollment a
+    JOIN report_date rd on rd.source_file = a.source_file
+    LEFT JOIN hdis_dev.staging.pstg_project c on a.project_id = c.project_id and a.source_file = c.source_file 
+	LEFT JOIN error_tbl b ON coalesce(a.enrollment_id,a.stg_md5_hash_value)= b.business_key_value and a.source_file = b.source_file and b.query_name in (''ENROLLMENT_28'', ''ENROLLMENT_80'',''ENROLLMENT_29'', ''ENROLLMENT_81'',''ENROLLMENT_17'',''ENROLLMENT_32'', ''ENROLLMENT_84'',''ENROLLMENT_33'',''ENROLLMENT_85'',''ENROLLMENT_18'') 
+
+UNION ALL
+
+	SELECT ''ENROLLMENT.CSV'' fileName
+        ,''Entry Date'' DataElement
+        ,a.pstg_row_id
+        ,a.project_id
+        ,c.organization_id
+        ,a.source_file
+        ,c.project_type
+        ,c.project_name||''|''||c.project_id project_name_and_id
+        ,rd.report_date
+        ,NULL Error_1
+        ,NULL as Error_2
+        ,case when b.business_key_value is not null then ''Error'' end as Error_3
+		,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+		,current_date() as date_loaded, PRIORITIZATION
+	FROM enrollment a
+    JOIN report_date rd on rd.source_file = a.source_file
+    LEFT JOIN hdis_dev.staging.pstg_project c on a.project_id = c.project_id and a.source_file = c.source_file 
+	LEFT JOIN error_tbl b ON coalesce(a.enrollment_id,a.stg_md5_hash_value)= b.business_key_value and a.source_file = b.source_file and b.query_name in (''ENROLLMENT_3'', ''ENROLLMENT_124'', ''ENROLLMENT_142'', ''ENROLLMENT_143'', ''ENROLLMENT_146'', ''ENROLLMENT_147'', ''ENROLLMENT_153'')
+
+UNION ALL
+
+	SELECT ''ENROLLMENT.CSV'' fileName
+        ,''Length of Stay'' DataElement
+        ,a.pstg_row_id
+        ,a.project_id
+        ,c.organization_id
+        ,a.source_file
+        ,c.project_type
+        ,c.project_name||''|''||c.project_id project_name_and_id
+        ,rd.report_date
+        ,case when a.length_of_stay = 99 then ''RecCount99'' end as Error_1
+        ,case when a.length_of_stay in (8,9) then ''RecCount89'' end as Error_2
+        ,case when b.business_key_value is not null then ''Error'' end as Error_3
+		,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+		,current_date() as date_loaded, PRIORITIZATION
+	FROM enrollment a
+    JOIN report_date rd on rd.source_file = a.source_file
+    LEFT JOIN hdis_dev.staging.pstg_project c on a.project_id = c.project_id and a.source_file = c.source_file 
+	LEFT JOIN error_tbl b ON coalesce(a.enrollment_id,a.stg_md5_hash_value)= b.business_key_value and a.source_file = b.source_file and b.query_name in (''ENROLLMENT_157'', ''ENROLLMENT_158'', ''ENROLLMENT_159'',''ENROLLMENT_29'',''ENROLLMENT_81'',''ENROLLMENT_160'',''ENROLLMENT_161'')
+
+UNION ALL
+
+	SELECT ''ENROLLMENT.CSV'' fileName
+        ,''Move In Date'' DataElement
+        ,a.pstg_row_id
+        ,a.project_id
+        ,c.organization_id
+        ,a.source_file
+        ,c.project_type
+        ,c.project_name||''|''||c.project_id project_name_and_id
+        ,rd.report_date
+        ,NULL as Error_1
+        ,NULL as Error_2
+        ,case when b.business_key_value is not null then ''Error'' end as Error_3
+		,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+		,current_date() as date_loaded, PRIORITIZATION
+	FROM enrollment a
+    JOIN report_date rd on rd.source_file = a.source_file
+    LEFT JOIN hdis_dev.staging.pstg_project c on a.project_id = c.project_id and a.source_file = c.source_file 
+	LEFT JOIN error_tbl b ON coalesce(a.enrollment_id,a.stg_md5_hash_value)= b.business_key_value and a.source_file = b.source_file and b.query_name in (''ENROLLMENT_20'', ''ENROLLMENT_127'',''ENROLLMENT_19'')
+
+UNION ALL
+
+	SELECT ''ENROLLMENT.CSV'' fileName
+        ,''Date of Engagement'' DataElement
+        ,a.pstg_row_id
+        ,a.project_id
+        ,c.organization_id
+        ,a.source_file
+        ,c.project_type
+        ,c.project_name||''|''||c.project_id project_name_and_id
+        ,rd.report_date
+        ,NULL as Error_1
+        ,NULL as Error_2
+        ,case when b.business_key_value is not null then ''Error'' end as Error_3
+		,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+		,current_date() as date_loaded, PRIORITIZATION
+	FROM enrollment a
+    JOIN report_date rd on rd.source_file = a.source_file
+    LEFT JOIN hdis_dev.staging.pstg_project c on a.project_id = c.project_id and a.source_file = c.source_file 
+	LEFT JOIN error_tbl b ON coalesce(a.enrollment_id,a.stg_md5_hash_value)= b.business_key_value and a.source_file = b.source_file and b.query_name = ''ENROLLMENT_126''
+
+UNION ALL
+
+SELECT ''INCOMEBENEFITS.CSV'' fileName
+        ,''Income and Benefits''
+        ,a.pstg_row_id
+        ,d.project_id
+        ,e.organization_id
+        ,a.source_file
+        ,e.project_type
+        ,e.project_name||''|''||e.project_id project_name_and_id
+        ,rd.report_date
+        ,case when income_from_any_source = 99 
+                   then ''RecCount99''
+                   end as Error_1
+       ,case when income_from_any_source in (8,9)
+				   then ''RecCount89''
+                   end as Error_2
+        ,case when b.business_key_value is not null then ''Error'' end as Error_3
+		,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+		,current_date() as date_loaded, PRIORITIZATION
+	FROM hdis_dev.staging.pstg_income_benefits a
+    JOIN report_date rd on rd.source_file = a.source_file
+	JOIN enrollment d ON a.enrollment_id = d.enrollment_id and a.source_file = d.source_file
+    LEFT JOIN hdis_dev.staging.pstg_project e on d.project_id = e.project_id and d.source_file = e.source_file
+	LEFT JOIN error_tbl b ON coalesce(a.income_benefits_id||''|''||a.enrollment_id||''|''||a.personal_id||''|''||a.information_date,a.stg_md5_hash_value) = b.business_key_value and a.source_file = b.source_file and b.query_name in (''INCOME_BENEFITS_5'', ''INCOME_BENEFITS_57'', ''INCOME_BENEFITS_149'', ''INCOME_BENEFITS_6'', ''INCOME_BENEFITS_58'',  
+              ''INCOME_BENEFITS_7'', ''INCOME_BENEFITS_59'', ''INCOME_BENEFITS_60'', ''INCOME_BENEFITS_8'', ''INCOME_BENEFITS_61'', ''INCOME_BENEFITS_9'', 
+              ''INCOME_BENEFITS_10'', ''INCOME_BENEFITS_62'', ''INCOME_BENEFITS_11'', ''INCOME_BENEFITS_63'', ''INCOME_BENEFITS_12'', ''INCOME_BENEFITS_64'',   
+              ''INCOME_BENEFITS_13'', ''INCOME_BENEFITS_65'', ''INCOME_BENEFITS_14'', ''INCOME_BENEFITS_66'', ''INCOME_BENEFITS_15'', ''INCOME_BENEFITS_67'', 
+              ''INCOME_BENEFITS_16'', ''INCOME_BENEFITS_68'', ''INCOME_BENEFITS_17'', ''INCOME_BENEFITS_69'', ''INCOME_BENEFITS_70'', ''INCOME_BENEFITS_18'', 
+              ''INCOME_BENEFITS_19'', ''INCOME_BENEFITS_71'', ''INCOME_BENEFITS_72'', ''INCOME_BENEFITS_20'')
+
+UNION ALL
+
+SELECT ''INCOMEBENEFITS.CSV'' fileName
+        ,''Non-Cash Benefits''
+        ,a.pstg_row_id
+        ,d.project_id
+        ,e.organization_id
+        ,a.source_file
+        ,e.project_type
+        ,e.project_name||''|''||e.project_id project_name_and_id
+        ,rd.report_date
+        ,case when BENEFITS_FROM_ANY_SOURCE = 99 
+                   then ''RecCount99''
+                   end as Error_1
+        ,case when BENEFITS_FROM_ANY_SOURCE IN (8,9)
+             then ''RecCount89''
+                   end as Error_2
+        ,case when b.business_key_value is not null then ''Error'' end as Error_3
+		,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+		,current_date() as date_loaded, PRIORITIZATION
+	FROM hdis_dev.staging.pstg_income_benefits a
+    JOIN report_date rd on rd.source_file = a.source_file
+	JOIN enrollment d ON a.enrollment_id = d.enrollment_id and a.source_file = d.source_file
+    LEFT JOIN hdis_dev.staging.pstg_project e on d.project_id = e.project_id and d.source_file = e.source_file
+	LEFT JOIN error_tbl b ON coalesce(a.income_benefits_id||''|''||a.enrollment_id||''|''||a.personal_id||''|''||a.information_date,a.stg_md5_hash_value) = b.business_key_value and a.source_file = b.source_file and b.query_name in (''INCOME_BENEFITS_22'', ''INCOME_BENEFITS_73'', ''INCOME_BENEFITS_23'', ''INCOME_BENEFITS_74'', ''INCOME_BENEFITS_24'', ''INCOME_BENEFITS_75'', ''INCOME_BENEFITS_25'', ''INCOME_BENEFITS_76'', ''INCOME_BENEFITS_26'', ''INCOME_BENEFITS_77'', ''INCOME_BENEFITS_27'', ''INCOME_BENEFITS_78'', ''INCOME_BENEFITS_28'', ''INCOME_BENEFITS_79'')
+
+UNION ALL
+
+SELECT ''INCOMEBENEFITS.CSV'' fileName
+        ,''Health Insurance''
+        ,a.pstg_row_id
+        ,d.project_id
+        ,e.organization_id
+        ,a.source_file
+        ,e.project_type
+        ,e.project_name||''|''||e.project_id project_name_and_id
+        ,rd.report_date
+        ,case when insurance_from_any_source = 99 
+        then ''RecCount99''
+        end as Error_1
+      ,case when insurance_from_any_source in (8,9)
+             then ''RecCount89''
+                   end as Error_2
+        ,case when b.business_key_value is not null then ''Error'' end as Error_3
+		,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+		,current_date() as date_loaded, PRIORITIZATION
+	FROM hdis_dev.staging.pstg_income_benefits a
+    JOIN report_date rd on rd.source_file = a.source_file
+	JOIN enrollment d ON a.enrollment_id = d.enrollment_id and a.source_file = d.source_file
+    LEFT JOIN hdis_dev.staging.pstg_project e on d.project_id = e.project_id and d.source_file = e.source_file
+	LEFT JOIN error_tbl b ON coalesce(a.income_benefits_id||''|''||a.enrollment_id||''|''||a.personal_id||''|''||a.information_date,a.stg_md5_hash_value) = b.business_key_value and a.source_file = b.source_file and b.query_name in (''INCOME_BENEFITS_30'', ''INCOME_BENEFITS_80'', ''INCOME_BENEFITS_31'', ''INCOME_BENEFITS_81'', ''INCOME_BENEFITS_32'', 
+              ''INCOME_BENEFITS_82'', ''INCOME_BENEFITS_132'', ''INCOME_BENEFITS_83'', ''INCOME_BENEFITS_84'', ''INCOME_BENEFITS_133'', ''INCOME_BENEFITS_85'', 
+              ''INCOME_BENEFITS_33'', ''INCOME_BENEFITS_86'', ''INCOME_BENEFITS_134'', ''INCOME_BENEFITS_34'', ''INCOME_BENEFITS_87'', ''INCOME_BENEFITS_35'', 
+              ''INCOME_BENEFITS_88'', ''INCOME_BENEFITS_135'', ''INCOME_BENEFITS_36'', ''INCOME_BENEFITS_37'', ''INCOME_BENEFITS_89'', ''INCOME_BENEFITS_38'', 
+              ''INCOME_BENEFITS_90'', ''INCOME_BENEFITS_136'', ''INCOME_BENEFITS_43'', ''INCOME_BENEFITS_95'', ''INCOME_BENEFITS_44'', ''INCOME_BENEFITS_96'', 
+              ''INCOME_BENEFITS_139'', ''INCOME_BENEFITS_45'', ''INCOME_BENEFITS_97'', ''INCOME_BENEFITS_46'', ''INCOME_BENEFITS_98'', ''INCOME_BENEFITS_140'', 
+              ''INCOME_BENEFITS_47'', ''INCOME_BENEFITS_48'', ''INCOME_BENEFITS_99'', ''INCOME_BENEFITS_141'', ''INCOME_BENEFITS_49'', ''INCOME_BENEFITS_100'', 
+              ''INCOME_BENEFITS_50'', ''INCOME_BENEFITS_101'', ''INCOME_BENEFITS_102'', ''INCOME_BENEFITS_143'', ''INCOME_BENEFITS_103'',''INCOME_BENEFITS_52'', 
+              ''INCOME_BENEFITS_104'', ''INCOME_BENEFITS_53'')
+
+UNION ALL
+
+SELECT ''HEALTHANDDV.CSV'' fileName
+		,''DOMESTIC VIOLENCE'' DataElement
+        ,a.pstg_row_id
+        ,d.project_id
+        ,e.organization_id
+        ,a.source_file
+        ,e.project_type
+        ,e.project_name||''|''||e.project_id project_name_and_id
+        ,rd.report_date
+        ,case when a.domestic_violence_survivor = 99 then ''RecCount99''
+              end as Error_1
+        ,case when a.domestic_violence_survivor in (8,9) then ''RecCount89''
+              end Error_2
+        ,case when b.business_key_value is not null then ''Error'' end as Error_3
+		,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+		,current_date() as date_loaded, PRIORITIZATION
+	FROM hdis_dev.staging.pstg_health_and_dv a
+    JOIN report_date rd on rd.source_file = a.source_file
+	JOIN enrollment d ON a.enrollment_id = d.enrollment_id and a.source_file = d.source_file
+    LEFT JOIN hdis_dev.staging.pstg_project e on d.project_id = e.project_id and d.source_file = e.source_file
+	LEFT JOIN error_tbl b ON coalesce(a.health_and_dv_id||''|''||a.enrollment_id||''|''||a.personal_id||''|''||a.information_date,a.stg_md5_hash_value)=b.business_key_value and a.source_file = b.source_file and b.query_name in (''HEALTH_AND_DV_5'', ''HEALTH_AND_DV_15'')
+
+UNION ALL
+
+	SELECT ''SERVICES.CSV'' fileName
+		,''BED NIGHTS'' DataElement
+        ,a.pstg_row_id
+        ,d.project_id
+        ,e.organization_id
+        ,a.source_file
+        ,e.project_type
+        ,e.project_name||''|''||e.project_id project_name_and_id
+        ,rd.report_date
+        ,NULL Error_1
+        ,NULL Error_2
+        ,case when b.business_key_value is not null then ''Error'' end as Error_3
+		,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+		,current_date() as date_loaded, PRIORITIZATION
+	FROM hdis_dev.staging.pstg_services a
+    JOIN report_date rd on rd.source_file = a.source_file
+	JOIN enrollment d ON a.enrollment_id = d.enrollment_id and a.source_file = d.source_file
+    LEFT JOIN hdis_dev.staging.pstg_project e on d.project_id = e.project_id and d.source_file = e.source_file
+	LEFT JOIN error_tbl b ON coalesce(a.services_id||''|''||a.enrollment_id||''|''||a.personal_id||''|''||a.date_provided||''|''||a.record_type||''|''||a.type_provided,a.stg_md5_hash_value)= b.business_key_value and a.source_file = b.source_file and b.query_name = ''SERVICES_51''
+
+UNION ALL
+
+	SELECT ''EXIT.CSV'' fileName
+        ,''Exit Date'' DataElement
+        ,a.pstg_row_id
+        ,d.project_id
+        ,e.organization_id
+        ,a.source_file
+        ,e.project_type 
+        ,e.project_name||''|''||e.project_id project_name_and_id
+        ,rd.report_date
+        ,NULL Error_1
+        ,NULL as Error_2
+        ,case when b.business_key_value is not null then ''Error'' end as Error_3
+		,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+		,current_date() as date_loaded, PRIORITIZATION
+	FROM hdis_dev.staging.pstg_exit a
+    JOIN report_date rd on rd.source_file = a.source_file
+	JOIN enrollment d ON a.enrollment_id = d.enrollment_id and a.source_file = d.source_file
+    LEFT JOIN hdis_dev.staging.pstg_project e on d.project_id = e.project_id and d.source_file = e.source_file
+	LEFT JOIN error_tbl b ON coalesce(a.exit_id||''|''||a.enrollment_id,a.stg_md5_hash_value) = b.business_key_value and a.source_file = b.source_file and b.query_name = ''EXIT_102''
+
+UNION ALL
+
+	SELECT ''EXIT.CSV'' fileName
+        ,''Destination'' DataElement
+        ,a.pstg_row_id
+        ,d.project_id
+        ,e.organization_id
+        ,a.source_file
+        ,e.project_type
+        ,e.project_name||''|''||e.project_id project_name_and_id
+        ,rd.report_date
+        ,case when a.destination in (17,30,99) then ''RecCount99''
+              end as Error_1
+        ,case when a.destination in (8,9) then ''RecCount89''
+              end as Error_2
+        ,case when b.business_key_value is not null then ''Error'' end as Error_3
+		,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+		,current_date() as date_loaded, PRIORITIZATION
+	FROM hdis_dev.staging.pstg_exit a
+    JOIN report_date rd on rd.source_file = a.source_file
+	JOIN enrollment d ON a.enrollment_id = d.enrollment_id and a.source_file = d.source_file
+    LEFT JOIN hdis_dev.staging.pstg_project e on d.project_id = e.project_id and d.source_file = e.source_file
+	LEFT JOIN error_tbl b ON coalesce(a.exit_id||''|''||a.enrollment_id,a.stg_md5_hash_value) = b.business_key_value and a.source_file = b.source_file and b.query_name in (''EXIT_4'', ''EXIT_30'', ''EXIT_35'', ''EXIT_71'')
+
+UNION ALL
+
+	SELECT ''CURRENTLIVINGSITUATION.CSV'' fileName
+		,''CURRENT LIVING SITUATION'' DataElement
+        ,a.pstg_row_id
+        ,d.project_id
+        ,e.organization_id
+        ,a.source_file
+        ,e.project_type
+        ,e.project_name||''|''||e.project_id project_name_and_id
+        ,rd.report_date
+        ,case when current_living_situation = 99 then ''RecCount99''
+              end as Error_1
+        ,case when current_living_situation in (8,9) then ''RecCount89''
+              end as Error_2
+        ,case when b.business_key_value is not null then ''Error'' end as Error_3
+		,CONCAT (
+            YEAR(coalesce(TRY_TO_DATE(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(TRY_TO_DATE(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+		,current_date() as date_loaded, PRIORITIZATION
+	FROM hdis_dev.staging.pstg_current_living_situation a
+    JOIN report_date rd on rd.source_file = a.source_file
+	JOIN enrollment d on a.enrollment_id = d.enrollment_id and a.source_file =   
+    d.source_file
+    LEFT JOIN hdis_dev.staging.pstg_project e on d.project_id = e.project_id and d.source_file = e.source_file
+	LEFT JOIN error_tbl b ON coalesce(a.current_living_sit_id||''|''||a.enrollment_id||''|''||a.personal_id||''|''||a.information_date||''|''||a.current_living_situation, a.stg_md5_hash_value) = b.business_key_value and a.source_file = b.source_file and b.query_name in (''CURRENT_LIVING_SITUATION_4'', ''CURRENT_LIVING_SITUATION_21'', ''CURRENT_LIVING_SITUATION_32'')
+    ) 
+select 
+UPPER(base.filename) as filename
+,UPPER(base.dataelement) as dataelement
+,UPPER(base.pstg_row_id) as pstg_row_id
+,UPPER(base.source_file) as source_file
+,CASE base.PROJECT_TYPE
+        WHEN 0 THEN ''Emergency Shelter – Entry Exit''
+        WHEN 1 THEN ''Emergency Shelter – Night-by-Night''
+        WHEN 2 THEN ''Transitional Housing''
+        WHEN 3 THEN ''PH – Permanent Supportive Housing''
+        WHEN 4 THEN ''Street Outreach''
+        WHEN 6 THEN ''Services Only''
+        WHEN 7 THEN ''Other''
+        WHEN 8 THEN ''Safe Haven''
+        WHEN 9 THEN ''PH – Housing Only''
+        WHEN 10 THEN ''PH – Housing with Services (no disability required for entry)''
+        WHEN 11 THEN ''Day Shelter''
+        WHEN 12 THEN ''Homelessness Prevention''
+        WHEN 13 THEN ''PH – Rapid Re-Housing''
+        WHEN 14 THEN ''Coordinated Entry''
+        ELSE ''Unknown''
+    END AS PROJECT_TYPE_NAME, 
+  CASE fun.FUNDER
+        WHEN 1 THEN ''HUD: CoC – Homelessness Prevention (High Performing Comm. Only)''
+        WHEN 2 THEN ''HUD: CoC – Permanent Supportive Housing''
+        WHEN 3 THEN ''HUD: CoC – Rapid Re-Housing''
+        WHEN 4 THEN ''HUD: CoC – Supportive Services Only''
+        WHEN 5 THEN ''HUD: CoC – Transitional Housing''
+        WHEN 6 THEN ''HUD: CoC – Safe Haven''
+        WHEN 7 THEN ''HUD: CoC – Single Room Occupancy (SRO)''
+        WHEN 8 THEN ''HUD: ESG – Emergency Shelter (operating and/or essential services)''
+        WHEN 9 THEN ''HUD: ESG – Homelessness Prevention''
+        WHEN 10 THEN ''HUD: ESG – Rapid Rehousing''
+        WHEN 11 THEN ''HUD: ESG – Street Outreach''
+        WHEN 13 THEN ''HUD: HOPWA – Hotel/Motel Vouchers''
+        WHEN 14 THEN ''HUD: HOPWA – Housing Information''
+        WHEN 15 THEN ''HUD: HOPWA – Permanent Housing (facility based or TBRA)''
+        WHEN 16 THEN ''HUD: HOPWA – Permanent Housing Placement''
+        WHEN 17 THEN ''HUD: HOPWA – Short-Term Rent, Mortgage, Utility assistance''
+        WHEN 18 THEN ''HUD: HOPWA – Short-Term Supportive Facility''
+        WHEN 19 THEN ''HUD: HOPWA – Transitional Housing (facility based or TBRA)''
+        WHEN 20 THEN ''HUD: HUD/VASH''
+        WHEN 21 THEN ''HHS: PATH – Street Outreach & Supportive Services Only''
+        WHEN 22 THEN ''HHS: RHY – Basic Center Program (prevention and shelter)''
+        WHEN 23 THEN ''HHS: RHY – Maternity Group Home for Pregnant and Parenting Youth''
+        WHEN 24 THEN ''HHS: RHY – Transitional Living Program''
+        WHEN 25 THEN ''HHS: RHY – Street Outreach Project''
+        WHEN 26 THEN ''HHS: RHY – Demonstration Project''
+        WHEN 27 THEN ''VA: CRS Contract Residential Services''
+        WHEN 30 THEN ''VA: Community Contract Safe Haven Program''
+        WHEN 33 THEN ''VA: Supportive Services for Veteran Families''
+        WHEN 34 THEN ''N/A''
+        WHEN 35 THEN ''HUD: Pay for Success''
+        WHEN 36 THEN ''HUD: Public and Indian Housing (PIH) Programs''
+        WHEN 37 THEN ''VA: Grant Per Diem – Bridge Housing''
+        WHEN 38 THEN ''VA: Grant Per Diem – Low Demand''
+        WHEN 39 THEN ''VA: Grant Per Diem – Hospital to Housing''
+        WHEN 40 THEN ''VA: Grant Per Diem – Clinical Treatment''
+        WHEN 41 THEN ''VA: Grant Per Diem – Service Intensive Transitional Housing''
+        WHEN 42 THEN ''VA: Grant Per Diem – Transition in Place''
+        WHEN 43 THEN ''HUD: CoC – Youth Homeless Demonstration Program (YHDP)''
+        WHEN 44 THEN ''HUD: CoC – Joint Component TH/RRH''
+        WHEN 45 THEN ''VA: Grant Per Diem – Case Management/Housing Retention''
+        WHEN 46 THEN ''Local or Other Funding Source (Please Specify)''
+        WHEN 47 THEN ''HUD: ESG – CV''
+        WHEN 48 THEN ''HUD: HOPWA – CV''
+        WHEN 50 THEN ''HUD: HOME''
+        WHEN 51 THEN ''HUD: HOME (ARP)''
+        WHEN 52 THEN ''HUD: PIH (Emergency Housing Voucher)''
+        WHEN 53 THEN ''HUD: ESG – RUSH''
+        WHEN 54 THEN ''HUD: Unsheltered Special NOFO''
+        WHEN 55 THEN ''HUD: Rural Special NOFO''
+        ELSE ''Unknown''
+    END AS FUNDER_NAME
+,org.organization_name
+,fun.other_funder
+,base.project_name_and_id
+,base.error_1
+,base.error_2
+,base.error_3
+,base.quarter_year
+,fun.funder
+,base.report_date
+,base.date_loaded, PRIORITIZATION
+from base 
+left join hdis_dev.staging.pstg_funder fun on base.project_id = fun.project_id and base.source_file = fun.source_file
+left join hdis_dev.staging.pstg_organization org on org.organization_id = base.organization_id and org.source_file = base.source_file
+;
+
+-- Return message to confirm that the table has been refreshed
+RETURN ''Target tables refreshed successfully.'';
+END;
+';
