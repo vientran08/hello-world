@@ -1,0 +1,672 @@
+CREATE OR REPLACE PROCEDURE HDIS_SBX.SBX_LOREN_HARDY.REFRESH_STATE_DEPT_DQ_QA()
+RETURNS VARCHAR
+LANGUAGE SQL
+EXECUTE AS OWNER
+AS '
+BEGIN
+
+TRUNCATE TABLE state_dept_dq_qa;
+
+-- Insert data into the STATE DEPT DQ table from the query
+INSERT INTO state_dept_dq_qa (filename, dataelement, dept, program, other_funder_code, project_type, project_id, project_name, organization_id, quarter_year, organization_name, grant_id, start_date, end_date,
+query_name, pstg_row_id, coc_dashboard_name, response_not_valid, data_not_collected, client_doesnt_know, date_loaded, PRIORITIZATION)
+//
+with enrollment as (
+select distinct enrollment_id, source_file, personal_id, project_id, pstg_row_id, disabling_condition, entry_date, stg_md5_hash_value, relationship_to_hoh, living_situation, length_of_stay from HDIS_PROD.staging.pstg_enrollment where 
+coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP) >= DATEADD(YEAR, - 1, DATE_TRUNC(''quarter'', DATEADD(''quarter'', - 4, CURRENT_DATE))) AND (YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)) < YEAR(CURRENT_DATE) OR (YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)) = YEAR(CURRENT_DATE) AND QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)) <= QUARTER(CURRENT_DATE)))
+),
+error_tbl as (
+select a.*, PRIORITIZATION from hdis_prod.staging.error_tbl_2 a
+join HDIS_DEV.STAGING.CTRL_VALIDATION b on a.query_name = b.query_name
+ where error_date_value >= DATEADD(YEAR, - 1, DATE_TRUNC(''quarter'', DATEADD(''quarter'', - 4, CURRENT_DATE))) AND (YEAR(error_date_value) < YEAR(CURRENT_DATE) OR (YEAR(error_date_value) = YEAR(CURRENT_DATE) AND QUARTER(error_date_value) <= QUARTER(CURRENT_DATE)))
+),
+program_funder AS (
+select
+pro.project_name
+,fun.project_id
+,pro.project_type
+,org.organization_id
+,org.organization_name
+,fun.source_file
+,fun.grant_id
+,fun.start_date
+,fun.end_date
+,sbx.other_funder as other_funder_code
+,case 
+    when other_funder_code in (''CA-HCD-Homekey'',''CA-HCD-MHP'',''CA-HCD-VHHP'',''CA-HCD-HHCII'',''CA-HCD-NPLH'',''CA-County-NPLH'') then ''HCD''
+    when other_funder_code in (''CA-HCFC-HHAP1'',''CA-HCFC-HHAP2'',''CA-CALICH-HHAP3'',''CA-CALICH-HHAP4'',''CA-HCD-HHAP5'',''CA-CALICH-ERF1'',''CA-CALICH-ERF2L'',''CA-CALICH-ERF2R'',''CA-CALICH-ERF3L'',''CA-HCD-ERF3R'', ''CA-HCD-ERF4L'', ''CA-CALICH-FHC'') then ''HCD''
+    when other_funder_code in (''CA-CDSS-BFH'',''CA-CDSS-HDAP'',''CA-CDSS-HSP'',''CA-CDSS-HomeSafe'') then ''CDSS''
+    when other_funder_code = ''CA-CCCCO-CCHHIP'' then ''CCCCO''
+    when other_funder_code = ''CA-CALVET-VSSR'' then ''CalVet''
+    when other_funder_code = ''CA-DHCS-BHBH'' then ''DHCS''
+    end as Dept
+,case when other_funder_code = ''CA-CALICH-ERF1'' then ''ERF 1''
+      when other_funder_code = ''CA-CALICH-ERF2L'' then ''ERF 2L''
+      when other_funder_code = ''CA-CALICH-ERF2R'' then ''ERF 2R''
+      when other_funder_code = ''CA-CALICH-ERF3L'' then ''ERF 3L''
+      when other_funder_code = ''CA-HCD-ERF3R'' then ''ERF 3R''
+      when other_funder_code = ''CA-HCD-ERF4L'' then ''ERF 4L'' 
+      when other_funder_code = ''CA-CALICH-FHC'' then ''FHC''
+      when other_funder_code = ''CA-CALICH-HHAP3'' then ''HHAP 3''
+      when other_funder_code = ''CA-CALICH-HHAP4'' then ''HHAP 4''
+      when other_funder_code = ''CA-HCD-HHAP5'' then ''HHAP 5''
+      when other_funder_code = ''CA-CALVET-VSSR'' then ''VSSR''
+      when other_funder_code = ''CA-CCCCO-CCHHIP'' then ''CCHHIP''
+      when other_funder_code = ''CA-CDSS-BFH'' then ''BFH''
+      when other_funder_code = ''CA-CDSS-HDAP'' then ''HDAP''
+      when other_funder_code = ''CA-CDSS-HSP'' then ''HSP''
+      when other_funder_code = ''CA-CDSS-HomeSafe'' then ''HomeSafe''
+      when other_funder_code = ''CA-County-NPLH'' then ''County NPLH''
+      when other_funder_code = ''CA-HCD-HHCII'' then ''HHCII''
+      when other_funder_code = ''CA-HCD-Homekey'' then ''Homekey''
+      when other_funder_code = ''CA-HCD-MHP'' then ''MHP''
+      when other_funder_code = ''CA-HCD-NPLH'' then ''HCD NPLH''
+      when other_funder_code = ''CA-HCD-VHHP'' then ''VHHP''
+      when other_funder_code = ''CA-HCFC-HHAP1'' then ''HHAP 1''
+      when other_funder_code = ''CA-HCFC-HHAP2'' then ''HHAP 2''
+      when other_funder_code = ''CA-DHCS-BHBH'' then ''BHBH''
+      end as Program
+from HDIS_PROD.staging.pstg_funder fun
+join hdis_sbx.sbx_loren_hardy.ab977programs sbx on fun.other_funder ilike sbx.other_funder
+left join HDIS_PROD.staging.pstg_project pro on fun.project_id = pro.project_id and fun.source_file = pro.source_file
+left join HDIS_PROD.staging.pstg_organization org on pro.organization_id = org.organization_id and pro.source_file = org.source_file
+),
+base as (
+select 
+''CLIENT.CSV'' filename,
+''NAME'' dataelement
+,cl.pstg_row_id
+,cl.source_file
+,en.project_id 
+,err.query_name
+,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+,case when err.business_key_value is not null then ''Error'' end as Response_Not_Valid
+,case when cl.name_data_quality = 99 then ''Error'' end as Data_Not_Collected
+,case when cl.name_data_quality in (8,9) then ''Error'' end as Client_Doesnt_Know, PRIORITIZATION
+from HDIS_PROD.staging.pstg_client cl
+join enrollment en on cl.personal_id = en.personal_id and cl.source_file = en.source_file
+left join error_tbl err on coalesce(cl.personal_id,cl.stg_md5_hash_value) = err.business_key_value and err.source_file = cl.source_file and err.query_name in (''CLIENT_50'', ''CLIENT_51'', ''CLIENT_52'', ''CLIENT_27'')
+
+union all
+
+select 
+''CLIENT.CSV'' filename,
+''DOB'' dataelement
+,cl.pstg_row_id
+,cl.source_file
+,en.project_id 
+,err.query_name
+,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+,case when err.business_key_value is not null then ''Error'' end as Response_Not_Valid
+,case when cl.dob_data_quality = 99 then ''Error'' end as Data_Not_Collected
+,case when cl.dob_data_quality in (8,9) then ''Error'' end as Client_Doesnt_Know, PRIORITIZATION
+from HDIS_PROD.staging.pstg_client cl
+join enrollment en on cl.personal_id = en.personal_id and cl.source_file = en.source_file
+left join error_tbl err on coalesce(cl.personal_id,cl.stg_md5_hash_value) = err.business_key_value and err.source_file = cl.source_file and en.source_file = err.source_file and err.query_name in (''CLIENT_125'', ''CLIENT_126'', ''CLIENT_120'')
+
+union all
+
+select 
+''CLIENT.CSV'' filename,
+''SSN'' dataelement
+,cl.pstg_row_id
+,cl.source_file
+,en.project_id 
+,err.query_name
+,CONCAT (
+   YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+         '' Q'',
+   QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+,case when err.business_key_value is not null then ''Error'' end as Response_Not_Valid
+,case when cl.ssn_data_quality = 99 then ''Error'' end as Data_Not_Collected
+,case when cl.ssn_data_quality in (8,9) then ''Error'' end as Client_Doesnt_Know, PRIORITIZATION
+from HDIS_PROD.staging.pstg_client cl
+join enrollment en on cl.personal_id = en.personal_id and cl.source_file = en.source_file
+left join error_tbl err on coalesce(cl.personal_id,cl.stg_md5_hash_value) = err.business_key_value and err.source_file = cl.source_file and err.query_name in (''CLIENT_54'', ''CLIENT_2'')
+
+union all
+
+select 
+''CLIENT.CSV'' filename,
+''VETERAN STATUS'' dataelement
+,cl.pstg_row_id
+,cl.source_file
+,en.project_id 
+,err.query_name
+,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+,case when err.business_key_value is not null then ''Error'' end as Response_Not_Valid
+,case when cl.veteran_status = 99 then ''Error'' end as Data_Not_Collected
+,case when cl.veteran_status in (8,9) then ''Error'' end as Client_Doesnt_know, PRIORITIZATION
+from HDIS_PROD.staging.pstg_client cl
+join enrollment en on cl.personal_id = en.personal_id and cl.source_file = en.source_file
+left join error_tbl err on coalesce(cl.personal_id,cl.stg_md5_hash_value) = err.business_key_value and err.source_file = cl.source_file and err.query_name in (''CLIENT_109'', ''CLIENT_17'', ''CLIENT_45'', ''CLIENT_75'')
+
+union all
+
+select 
+''CLIENT.CSV'' filename,
+''RACE/ETHNICITY'' dataelement
+,cl.pstg_row_id
+,cl.source_file
+,en.project_id 
+,err.query_name
+,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+,case when err.business_key_value is not null then ''Error'' end as Response_Not_Valid
+,case when race_none = 99 then ''Error'' end as Data_Not_Collected
+,case when race_none in (8,9) then ''Error'' end as Client_Doesnt_Know, PRIORITIZATION
+from HDIS_PROD.staging.pstg_client cl
+join enrollment en on cl.personal_id = en.personal_id and cl.source_file = en.source_file
+left join error_tbl err on coalesce(cl.personal_id,cl.stg_md5_hash_value) = err.business_key_value and err.source_file = cl.source_file and err.query_name in (''CLIENT_5'', ''CLIENT_57'', ''CLIENT_47'', ''CLIENT_60'', ''CLIENT_48'', ''CLIENT_61'',''CLIENT_63'', ''CLIENT_9'', ''CLIENT_63'', ''CLIENT_59'', ''CLIENT_7'', ''CLIENT_10'', ''CLIENT_64'', ''CLIENT_6'', ''CLIENT_58'', ''CLIENT_8'', ''CLIENT_62'')
+
+union all
+
+select 
+''CLIENT.CSV'' filename,
+''GENDER'' dataelement
+,cl.pstg_row_id
+,cl.source_file
+,en.project_id 
+,err.query_name
+,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+,case when err.business_key_value is not null then ''Error'' end as Response_Not_Valid
+,case when gender_none = 99 then ''Error'' end as Data_Not_Collected
+,case when gender_none in (8,9) then ''Error'' end as Client_Doesnt_Know, PRIORITIZATION
+from HDIS_PROD.staging.pstg_client cl
+join enrollment en on cl.personal_id = en.personal_id and cl.source_file = en.source_file
+left join error_tbl err on coalesce(cl.personal_id,cl.stg_md5_hash_value) = err.business_key_value and err.source_file = cl.source_file and err.query_name in (''CLIENT_11'', ''CLIENT_66'', ''CLIENT_12'', ''CLIENT_67'', ''CLIENT_13'',''CLIENT_68'', ''CLIENT_24'', ''CLIENT_69'',''CLIENT_70'', ''CLIENT_14'',''CLIENT_71'', ''CLIENT_15'', ''CLIENT_72'', ''CLIENT_25'', ''CLIENT_16'',''CLIENT_73'')
+
+union all
+
+select 
+''ENROLLMENT.CSV'' filename,
+''Disabling Condition'' dataelement
+,en.pstg_row_id
+,en.source_file
+,en.project_id 
+,err.query_name
+,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+,case when err.business_key_value is not null then ''Error'' end as Response_Not_Valid
+,case when en.disabling_condition = 99 then ''Error'' end as Data_Not_Collected
+,case when en.disabling_condition in (8,9) then ''Error'' end as Client_Doesnt_Know, PRIORITIZATION
+from enrollment en
+left join error_tbl err on coalesce(en.enrollment_id,en.stg_md5_hash_value) = err.business_key_value and en.source_file = err.source_file and err.query_name in (''ENROLLMENT_6'', ''ENROLLMENT_34'', ''ENROLLMENT_86'')
+
+union all
+
+select 
+''ENROLLMENT.CSV'' filename,
+''Length of Stay'' dataelement
+,en.pstg_row_id
+,en.source_file
+,en.project_id 
+,err.query_name
+,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+,case when err.business_key_value is not null then ''Error'' end as Response_Not_Valid
+,case when en.length_of_stay = 99 then ''Error'' end as Data_Not_Collected
+,case when en.length_of_stay in (8,9) then ''Error'' end as Client_Doesnt_Know, PRIORITIZATION
+from enrollment en
+left join error_tbl err on coalesce(en.enrollment_id,en.stg_md5_hash_value) = err.business_key_value and en.source_file = err.source_file and err.query_name in (''ENROLLMENT_157'', ''ENROLLMENT_158'', ''ENROLLMENT_159'',''ENROLLMENT_29'',''ENROLLMENT_81'',''ENROLLMENT_160'',''ENROLLMENT_161'')
+
+union all
+
+select 
+''ENROLLMENT.CSV'' filename,
+''Relationship to HoH'' dataelement
+,en.pstg_row_id
+,en.source_file
+,en.project_id 
+,err.query_name
+,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+,case when err.business_key_value is not null then ''Error'' end as Response_Not_Valid
+,case when en.relationship_to_hoh = 99 then ''Error'' end as Data_Not_Collected
+,case when en.relationship_to_hoh in (8,9) then ''Error'' end as Client_Doesnt_Know, PRIORITIZATION
+from enrollment en
+left join error_tbl err on coalesce(en.enrollment_id,en.stg_md5_hash_value) = err.business_key_value and en.source_file = err.source_file and err.query_name in (''ENROLLMENT_27'', ''ENROLLMENT_79'', ''ENROLLMENT_163'', ''ENROLLMENT_164'', ''ENROLLMENT_5'')
+
+union all
+
+select 
+''ENROLLMENT.CSV'' filename,
+''Living Situation'' dataelement
+,en.pstg_row_id
+,en.source_file
+,en.project_id 
+,err.query_name
+,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+,case when err.business_key_value is not null then ''Error'' end as Response_Not_Valid
+,case when en.living_situation = 99 then ''Error'' end as Data_Not_Collected
+,case when en.living_situation in (8,9) then ''Error'' end as Client_Doesnt_Know, PRIORITIZATION
+from enrollment en
+left join error_tbl err on coalesce(en.enrollment_id,en.stg_md5_hash_value) = err.business_key_value and en.source_file = err.source_file and err.query_name in (''ENROLLMENT_28'', ''ENROLLMENT_80'',''ENROLLMENT_29'', ''ENROLLMENT_81'',''ENROLLMENT_17'',''ENROLLMENT_32'', ''ENROLLMENT_84'',''ENROLLMENT_33'',''ENROLLMENT_85'',''ENROLLMENT_18'')
+
+union all
+
+select 
+''ENROLLMENT.CSV'' filename,
+''Entry Date'' dataelement
+,en.pstg_row_id
+,en.source_file
+,en.project_id 
+,err.query_name
+,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+,case when err.business_key_value is not null then ''Error'' end as Response_Not_Valid
+,null as data_not_collected
+,null as Client_Doesnt_Know, PRIORITIZATION
+from enrollment en
+left join error_tbl err on coalesce(en.enrollment_id,en.stg_md5_hash_value) = err.business_key_value and en.source_file = err.source_file and err.query_name in (''ENROLLMENT_3'', ''ENROLLMENT_124'', ''ENROLLMENT_142'', ''ENROLLMENT_143'', ''ENROLLMENT_146'', ''ENROLLMENT_147'', ''ENROLLMENT_153'')
+
+union all
+
+select 
+''ENROLLMENT.CSV'' filename,
+''Move In Date'' dataelement
+,en.pstg_row_id
+,en.source_file
+,en.project_id 
+,err.query_name
+,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+,case when err.business_key_value is not null then ''Error'' end as response_not_valid
+,null as data_not_collected
+,null as Client_Doesnt_Know, PRIORITIZATION
+from enrollment en
+left join error_tbl err on coalesce(en.enrollment_id,en.stg_md5_hash_value) = err.business_key_value and en.source_file = err.source_file and err.query_name in (''ENROLLMENT_20'', ''ENROLLMENT_127'',''ENROLLMENT_19'')
+
+union all
+
+select 
+''ENROLLMENT.CSV'' filename,
+''Date of Engagement'' dataelement
+,en.pstg_row_id
+,en.source_file
+,en.project_id 
+,err.query_name
+,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+,case when err.business_key_value is not null then ''Error'' end as response_not_valid
+,null as data_not_collected
+,null as Client_Doesnt_Know, PRIORITIZATION
+from enrollment en
+left join error_tbl err on coalesce(en.enrollment_id,en.stg_md5_hash_value) = err.business_key_value and en.source_file = err.source_file and err.query_name = ''ENROLLMENT_126''
+
+union all
+
+select 
+''INCOMEBENEFITS.CSV'' filename,
+''Income Benefits'' dataelement
+,ib.pstg_row_id
+,ib.source_file
+,en.project_id 
+,err.query_name
+,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+,case when err.business_key_value is not null then ''Error'' end as response_not_valid
+,case when income_from_any_source = 99 then ''Error'' end as Data_Not_Collected
+,case when income_from_any_source in (8,9) then ''Error'' end as Client_Doesnt_Know, PRIORITIZATION
+from HDIS_PROD.staging.pstg_income_benefits ib
+join enrollment en on ib.enrollment_id = en.enrollment_id and ib.source_file = en.source_file
+left join error_tbl err on coalesce(ib.income_benefits_id||''|''||ib.enrollment_id||''|''||ib.personal_id||''|''||ib.information_date,ib.stg_md5_hash_value) = err.business_key_value and ib.source_file = err.source_file and en.source_file = err.source_file and err.query_name in (''INCOME_BENEFITS_5'', ''INCOME_BENEFITS_57'', ''INCOME_BENEFITS_149'', ''INCOME_BENEFITS_6'', ''INCOME_BENEFITS_58'',  
+              ''INCOME_BENEFITS_7'', ''INCOME_BENEFITS_59'', ''INCOME_BENEFITS_60'', ''INCOME_BENEFITS_8'', ''INCOME_BENEFITS_61'', ''INCOME_BENEFITS_9'', 
+              ''INCOME_BENEFITS_10'', ''INCOME_BENEFITS_62'', ''INCOME_BENEFITS_11'', ''INCOME_BENEFITS_63'', ''INCOME_BENEFITS_12'', ''INCOME_BENEFITS_64'',   
+              ''INCOME_BENEFITS_13'', ''INCOME_BENEFITS_65'', ''INCOME_BENEFITS_14'', ''INCOME_BENEFITS_66'', ''INCOME_BENEFITS_15'', ''INCOME_BENEFITS_67'', 
+              ''INCOME_BENEFITS_16'', ''INCOME_BENEFITS_68'', ''INCOME_BENEFITS_17'', ''INCOME_BENEFITS_69'', ''INCOME_BENEFITS_70'', ''INCOME_BENEFITS_18'',        ''INCOME_BENEFITS_19'', ''INCOME_BENEFITS_71'', ''INCOME_BENEFITS_72'', ''INCOME_BENEFITS_20'')
+
+union all
+
+select 
+''INCOMEBENEFITS.CSV'' filename,
+''Health Insurance'' dataelement
+,ib.pstg_row_id
+,ib.source_file
+,en.project_id 
+,err.query_name
+,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+,case when err.business_key_value is not null then ''Error'' end as Response_Not_Valid
+,case when insurance_from_any_source = 99 then ''Error'' end as Data_Not_Collected
+,case when insurance_from_any_source in (8,9) then ''Error'' end as Client_Doesnt_Know, PRIORITIZATION
+from HDIS_PROD.staging.pstg_income_benefits ib
+join enrollment en on ib.enrollment_id = en.enrollment_id and ib.source_file = en.source_file
+left join error_tbl err on coalesce(ib.income_benefits_id||''|''||ib.enrollment_id||''|''||ib.personal_id||''|''||ib.information_date,ib.stg_md5_hash_value) = err.business_key_value and ib.source_file = err.source_file and en.source_file = err.source_file and err.query_name in (''INCOME_BENEFITS_30'', ''INCOME_BENEFITS_80'', ''INCOME_BENEFITS_31'', ''INCOME_BENEFITS_81'', ''INCOME_BENEFITS_32'', 
+              ''INCOME_BENEFITS_82'', ''INCOME_BENEFITS_132'', ''INCOME_BENEFITS_83'', ''INCOME_BENEFITS_84'', ''INCOME_BENEFITS_133'', ''INCOME_BENEFITS_85'', 
+              ''INCOME_BENEFITS_33'', ''INCOME_BENEFITS_86'', ''INCOME_BENEFITS_134'', ''INCOME_BENEFITS_34'', ''INCOME_BENEFITS_87'', ''INCOME_BENEFITS_35'', 
+              ''INCOME_BENEFITS_88'', ''INCOME_BENEFITS_135'', ''INCOME_BENEFITS_36'', ''INCOME_BENEFITS_37'', ''INCOME_BENEFITS_89'', ''INCOME_BENEFITS_38'', 
+              ''INCOME_BENEFITS_90'', ''INCOME_BENEFITS_136'', ''INCOME_BENEFITS_43'', ''INCOME_BENEFITS_95'', ''INCOME_BENEFITS_44'', ''INCOME_BENEFITS_96'', 
+              ''INCOME_BENEFITS_139'', ''INCOME_BENEFITS_45'', ''INCOME_BENEFITS_97'', ''INCOME_BENEFITS_46'', ''INCOME_BENEFITS_98'', ''INCOME_BENEFITS_140'', 
+              ''INCOME_BENEFITS_47'', ''INCOME_BENEFITS_48'', ''INCOME_BENEFITS_99'', ''INCOME_BENEFITS_141'', ''INCOME_BENEFITS_49'', ''INCOME_BENEFITS_100'', 
+              ''INCOME_BENEFITS_50'', ''INCOME_BENEFITS_101'', ''INCOME_BENEFITS_102'', ''INCOME_BENEFITS_143'', ''INCOME_BENEFITS_103'',''INCOME_BENEFITS_52'', 
+              ''INCOME_BENEFITS_104'', ''INCOME_BENEFITS_53'')
+
+union all
+
+select 
+''INCOMEBENEFITS.CSV'' filename,
+''Non-Cash Benefits'' dataelement
+,ib.pstg_row_id
+,ib.source_file
+,en.project_id 
+,err.query_name
+,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+,case when err.business_key_value is not null then ''Error'' end as Response_Not_Valid
+,case when benefits_from_any_source = 99 then ''Error'' end as Data_Not_Collected
+,case when benefits_from_any_source in (8,9) then ''Error'' end as Client_Doesnt_Know, PRIORITIZATION
+from HDIS_PROD.staging.pstg_income_benefits ib
+join enrollment en on ib.enrollment_id = en.enrollment_id and ib.source_file = en.source_file
+left join error_tbl err on coalesce(ib.income_benefits_id||''|''||ib.enrollment_id||''|''||ib.personal_id||''|''||ib.information_date,ib.stg_md5_hash_value) = err.business_key_value and ib.source_file = err.source_file and en.source_file = err.source_file and err.query_name in (''INCOME_BENEFITS_22'', ''INCOME_BENEFITS_73'', ''INCOME_BENEFITS_23'', ''INCOME_BENEFITS_74'', ''INCOME_BENEFITS_24'', ''INCOME_BENEFITS_75'', ''INCOME_BENEFITS_25'', ''INCOME_BENEFITS_76'', ''INCOME_BENEFITS_26'', ''INCOME_BENEFITS_77'', ''INCOME_BENEFITS_27'', ''INCOME_BENEFITS_78'', ''INCOME_BENEFITS_28'', ''INCOME_BENEFITS_79'')
+
+union all
+
+select 
+''HEALTHANDDV.CSV'' filename,
+''Domestic Violence'' dataelement
+,h.pstg_row_id
+,h.source_file
+,en.project_id 
+,err.query_name
+,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+,case when err.business_key_value is not null then ''Error'' end as Response_Not_Valid
+,case when h.domestic_violence_survivor = 99 then ''Error'' end as Data_Not_Collected
+,case when h.domestic_violence_survivor in (8,9) then ''Error'' end as Client_Doesnt_Know, PRIORITIZATION
+from HDIS_PROD.staging.pstg_health_and_dv h
+join enrollment en on h.enrollment_id = en.enrollment_id and h.source_file = en.source_file
+LEFT JOIN error_tbl err ON coalesce(h.health_and_dv_id||''|''||h.enrollment_id||''|''||h.personal_id||''|''||h.information_date,h.stg_md5_hash_value)=err.business_key_value and h.source_file = err.source_file and en.source_file = err.source_file and err.query_name in (''HEALTH_AND_DV_5'', ''HEALTH_AND_DV_15'')
+
+union all
+
+select 
+''EXIT.CSV'' filename,
+''Exit date'' dataelement
+,ex.pstg_row_id
+,ex.source_file
+,en.project_id 
+,err.query_name
+,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+,case when err.business_key_value is not null then ''Error'' end as Response_Not_Valid
+,null as Data_Not_Collected
+,null as Client_Doesnt_Know, PRIORITIZATION
+from HDIS_PROD.staging.pstg_exit ex
+join enrollment en on ex.enrollment_id = en.enrollment_id and ex.source_file = en.source_file
+LEFT JOIN error_tbl err ON coalesce(ex.exit_id||''|''||ex.enrollment_id,ex.stg_md5_hash_value) = err.business_key_value and ex.source_file = err.source_file and en.source_file = err.source_file and err.query_name = ''EXIT_102''
+
+union all
+
+select 
+''EXIT.CSV'' filename,
+''Destination'' dataelement
+,ex.pstg_row_id
+,ex.source_file
+,en.project_id 
+,err.query_name
+,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+,case when err.business_key_value is not null then ''Error'' end as Response_Not_Valid
+,case when ex.destination in (17,30,99) then ''Error'' end as Data_Not_Collected
+,case when ex.destination in (8,9) then ''Error'' end as Client_Doesnt_Know, PRIORITIZATION
+from hdis_prod.staging.pstg_exit ex
+join enrollment en on ex.enrollment_id = en.enrollment_id and ex.source_file = en.source_file
+LEFT JOIN error_tbl err ON coalesce(ex.exit_id||''|''||ex.enrollment_id,ex.stg_md5_hash_value) = err.business_key_value and ex.source_file = err.source_file and err.query_name in (''EXIT_4'', ''EXIT_30'', ''EXIT_35'', ''EXIT_71'')
+
+union all
+
+select 
+''SERVICES.CSV'' filename,
+''Bed Nights'' dataelement
+,ser.pstg_row_id
+,ser.source_file
+,en.project_id 
+,err.query_name
+,CONCAT (
+            YEAR(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+,case when err.business_key_value is not null then ''Error'' end as Response_Not_Valid
+,null as Data_Not_Collected
+,null as Client_Doesnt_Know, PRIORITIZATION
+from hdis_prod.staging.pstg_services ser
+JOIN enrollment en ON ser.enrollment_id = en.enrollment_id and ser.source_file = en.source_file
+LEFT JOIN error_tbl err ON coalesce(ser.services_id||''|''||ser.enrollment_id||''|''||ser.personal_id||''|''||ser.date_provided||''|''||ser.record_type||''|''||ser.type_provided,ser.stg_md5_hash_value)= err.business_key_value and ser.source_file = err.source_file and err.query_name =''SERVICES_51''
+
+union all
+
+select 
+''CURRENTLIVINGSITUATION.CSV'' filename,
+''Current Living Situation'' dataelement
+,cls.pstg_row_id
+,cls.source_file
+,en.project_id 
+,err.query_name
+,CONCAT (
+            YEAR(coalesce(TRY_TO_DATE(entry_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(TRY_TO_DATE(entry_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+,case when err.business_key_value is not null then ''Error'' end as Response_Not_Valid
+,case when cls.current_living_situation = 99 then ''Error'' end as Data_Not_Collected
+,case when cls.current_living_situation in (8,9) then ''Error'' end as Client_Doesnt_Know, PRIORITIZATION
+from hdis_prod.staging.pstg_current_living_situation cls
+JOIN enrollment en ON cls.enrollment_id = en.enrollment_id and cls.source_file = en.source_file
+LEFT JOIN error_tbl err ON coalesce(cls.current_living_sit_id||''|''||cls.enrollment_id||''|''||cls.personal_id||''|''||cls.information_date||''|''||cls.current_living_situation, cls.stg_md5_hash_value) = err.business_key_value and cls.source_file = err.source_file and err.query_name in (''CURRENT_LIVING_SITUATION_4'', ''CURRENT_LIVING_SITUATION_21'', ''CURRENT_LIVING_SITUATION_32'')
+	
+union all
+
+select 
+''INVENTORY.CSV'' filename,
+''Inventory All'' dataelement
+,inv.pstg_row_id
+,inv.source_file
+,pro.project_id 
+,err.query_name
+,CONCAT (YEAR(coalesce(try_to_date(inventory_end_date), CURRENT_TIMESTAMP)),'' Q'',
+     QUARTER(coalesce(try_to_date(inventory_end_date), CURRENT_TIMESTAMP))) AS quarter_year 
+,case when err.business_key_value is not null then ''Error'' end as Response_Not_Valid
+,null as Data_Not_Collected
+,null as Client_Doesnt_Know, PRIORITIZATION
+from HDIS_PROD.staging.pstg_inventory inv
+LEFT JOIN hdis_prod.staging.pstg_project pro ON inv.project_id = pro.project_id and inv.source_file = pro.source_file
+LEFT JOIN error_tbl err ON coalesce(inv.INVENTORY_ID||''|''||inv.PROJECT_ID||''|''||inv.COC_CODE||''|''||inv.HOUSEHOLD_TYPE,inv.stg_md5_hash_value) = err.business_key_value and inv.source_file = err.source_file and err.table_name like ''PSTG_INVENTORY'' and err.query_name not in (''INVENTORY_1'', ''INVENTORY_7'', ''INVENTORY_8'', ''INVENTORY_9'', ''INVENTORY_10'', ''INVENTORY_21'', ''INVENTORY_22'', ''INVENTORY_23'', ''INVENTORY_24'', ''INVENTORY_38'', ''INVENTORY_39'', ''INVENTORY_45'', ''INVENTORY_46'', ''INVENTORY_47'', ''INVENTORY_48'', ''INVENTORY_49'')
+WHERE coalesce(try_to_date(inventory_end_date), CURRENT_TIMESTAMP) >= DATEADD(YEAR, - 1, DATE_TRUNC(''quarter'', DATEADD(''quarter'', - 4, CURRENT_DATE))) AND (YEAR(coalesce(try_to_date(inventory_end_date), CURRENT_TIMESTAMP)) < YEAR(CURRENT_DATE) OR (YEAR(coalesce(try_to_date(inventory_end_date), CURRENT_TIMESTAMP)) = YEAR(CURRENT_DATE) AND QUARTER(coalesce(try_to_date(inventory_end_date), CURRENT_TIMESTAMP)) <= QUARTER(CURRENT_DATE))) 
+
+union all
+
+select 
+''ORGANIZATION.CSV'' filename,
+''Organization All'' dataelement
+,org.pstg_row_id
+,org.source_file
+,pro.project_id 
+,err.query_name
+,CONCAT (
+   YEAR(coalesce(try_to_date(operating_end_date), CURRENT_TIMESTAMP)),
+       '' Q'',
+   QUARTER(coalesce(try_to_date(operating_end_date), CURRENT_TIMESTAMP))
+) AS quarter_year
+,case when err.business_key_value is not null then ''Error'' end as response_not_valid
+,null as data_not_collected
+,null as Client_Doesnt_Know, PRIORITIZATION
+from hdis_prod.staging.pstg_organization org
+LEFT JOIN HDIS_PROD.staging.pstg_project pro ON org.organization_id = pro.organization_id and org.source_file = pro.source_file
+LEFT JOIN error_tbl err ON coalesce(org.organization_id,org.stg_md5_hash_value) = err.business_key_value and org.source_file = err.source_file and err.table_name like ''PSTG_ORGANIZATION'' and err.query_name NOT IN (''ORGANIZATION_1'', ''ORGANIZATION_2'', ''ORGANIZATION_3'', ''ORGANIZATION_4'', ''ORGANIZATION_12'', ''ORGANIZATION_13'', ''ORGANIZATION_14'', ''ORGANIZATION_16'', ''ORGANIZATION_17'', ''ORGANIZATION_18'', ''ORGANIZATION_20'')
+	WHERE coalesce(try_to_date(operating_end_date), CURRENT_TIMESTAMP) >= DATEADD(YEAR, - 1, DATE_TRUNC(''quarter'', DATEADD(''quarter'', - 4, CURRENT_DATE))) AND (YEAR(coalesce(try_to_date(operating_end_date), CURRENT_TIMESTAMP)) < YEAR(CURRENT_DATE) OR (YEAR(coalesce(try_to_date(operating_end_date), CURRENT_TIMESTAMP)) = YEAR(CURRENT_DATE) AND QUARTER(coalesce(try_to_date(operating_end_date), CURRENT_TIMESTAMP)) <= QUARTER(CURRENT_DATE)))
+
+union all
+
+select 
+''PROJECT.CSV'' filename,
+''Project All'' dataelement
+,pro.pstg_row_id
+,pro.source_file
+,pro.project_id 
+,err.query_name
+,CONCAT (
+            YEAR(coalesce(try_to_date(operating_end_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(operating_end_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+,case when err.business_key_value is not null then ''Error'' end as response_not_valid
+,null as data_not_collected
+,null as Client_Doesnt_Know, PRIORITIZATION
+from hdis_prod.staging.pstg_project pro
+LEFT JOIN error_tbl err ON coalesce(pro.project_id,pro.stg_md5_hash_value) = err.business_key_value and pro.source_file = err.source_file and err.table_name like ''PSTG_PROJECT'' and err.query_name not in (''PROJECT_28'', ''PROJECT_39'', ''PROJECT_10'', ''PROJECT_40'', ''PROJECT_7'', ''PROJECT_41'', ''PROJECT_29'', ''PROJECT_6'', ''PROJECT_5'', ''PROJECT_30'', ''PROJECT_43'', ''PROJECT_44'') 
+	WHERE coalesce(try_to_date(operating_end_date), CURRENT_TIMESTAMP) >= DATEADD(YEAR, - 1, DATE_TRUNC(''quarter'', DATEADD(''quarter'', - 4, CURRENT_DATE))) AND (YEAR(coalesce(try_to_date(operating_end_date), CURRENT_TIMESTAMP)) < YEAR(CURRENT_DATE) OR (YEAR(coalesce(try_to_date(operating_end_date), CURRENT_TIMESTAMP)) = YEAR(CURRENT_DATE) AND QUARTER(coalesce(try_to_date(operating_end_date), CURRENT_TIMESTAMP)) <= QUARTER(CURRENT_DATE))) 
+
+union all
+
+select 
+''PROJECTCOC.CSV'' filename,
+''Project CoC All'' dataelement
+,pcoc.pstg_row_id
+,pcoc.source_file
+,pcoc.project_id 
+,err.query_name
+,CONCAT (
+            YEAR(coalesce(try_to_date(pro.operating_end_date), CURRENT_TIMESTAMP)),
+            '' Q'',
+            QUARTER(coalesce(try_to_date(pro.operating_end_date), CURRENT_TIMESTAMP))
+			) AS quarter_year
+,case when err.business_key_value is not null then ''Error'' end as response_not_valid
+,case when geography_type = 99 then ''Error'' end as data_not_collected
+,null as Client_Doesnt_Know, PRIORITIZATION
+from hdis_prod.staging.pstg_project_coc pcoc
+LEFT JOIN hdis_prod.staging.pstg_project pro on pcoc.project_id = pro.project_id and pcoc.source_file = pro.source_file
+LEFT JOIN error_tbl err ON coalesce(pcoc.project_coc_id||''|''||pcoc.project_id,pcoc.stg_md5_hash_value) = err.business_key_value and pcoc.source_file = err.source_file and err.table_name like ''PSTG_PROJECT_COC'' and err.query_name NOT IN (''PROJECT_COC_1'', ''PROJECT_COC_11'', ''PROJECT_COC_13'', ''PROJECT_COC_10'', ''PROJECT_COC_12'', ''PROJECT_COC_28'', ''PROJECT_COC_29'', ''PROJECT_COC_4'', ''PROJECT_COC_25'', ''PROJECT_COC_5'', ''PROJECT_COC_26'', ''PROJECT_COC_27'', ''PROJECT_COC_6'', ''PROJECT_COC_22'', ''PROJECT_COC_23'', ''PROJECT_COC_7'')
+	WHERE coalesce(try_to_date(pro.operating_end_date), CURRENT_TIMESTAMP) >= DATEADD(YEAR, - 1, DATE_TRUNC(''quarter'', DATEADD(''quarter'', - 4, CURRENT_DATE))) AND (YEAR(coalesce(try_to_date(pro.operating_end_date), CURRENT_TIMESTAMP)) < YEAR(CURRENT_DATE) OR (YEAR(coalesce(try_to_date(pro.operating_end_date), CURRENT_TIMESTAMP)) = YEAR(CURRENT_DATE) AND QUARTER(coalesce(try_to_date(pro.operating_end_date), CURRENT_TIMESTAMP)) <= QUARTER(CURRENT_DATE))) 
+
+union all
+
+select 
+''FUNDER.CSV'' filename,
+''Funder All'' dataelement
+,fun.pstg_row_id
+,fun.source_file
+,fun.project_id 
+,err.query_name
+,CONCAT (
+            YEAR(CASE WHEN try_to_date(end_date) IS NULL AND try_to_date(start_date) IS NULL THEN try_to_date(fun.date_updated) WHEN try_to_date(end_date) IS NULL             THEN try_to_date(start_date) ELSE try_to_date(end_date) END),
+            '' Q'',
+            QUARTER(CASE WHEN try_to_date(end_date) IS NULL AND try_to_date(start_date) IS NULL THEN try_to_date(fun.date_updated) WHEN try_to_date(end_date) IS               NULL THEN try_to_date(start_date) ELSE try_to_date(end_date) END)
+			) AS quarter_year
+,case when err.business_key_value is not null then ''Error'' end as response_not_valid
+,null as data_not_collected
+,null as Client_Doesnt_Know, PRIORITIZATION
+from hdis_prod.staging.pstg_funder fun
+LEFT JOIN error_tbl err ON coalesce(fun.funder_id||''|''||fun.project_id,fun.stg_md5_hash_value)= err.business_key_value and fun.source_file = err.source_file and err.table_name like ''PSTG_FUNDER'' and err.query_name NOT IN (''FUNDER_42'', ''FUNDER_44'', ''FUNDER_57'', ''FUNDER_58'', ''FUNDER_43'', ''FUNDER_45'', ''FUNDER_1'', ''FUNDER_54'', ''FUNDER_6'', ''FUNDER_7'', ''FUNDER_55'', ''FUNDER_56'', ''FUNDER_8'', ''FUNDER_49'', ''FUNDER_9'', ''FUNDER_50'', ''FUNDER_2'')
+WHERE (CASE WHEN try_to_date(end_date) IS NULL AND try_to_date(start_date) IS NULL THEN try_to_date(fun.date_updated) WHEN try_to_date(end_date) IS NULL THEN try_to_date(start_date) ELSE try_to_date(end_date) END) >= DATEADD(YEAR, - 1, DATE_TRUNC(''quarter'', DATEADD(''quarter'', - 4, CURRENT_DATE))) AND (YEAR(CASE WHEN try_to_date(end_date) IS NULL AND try_to_date(start_date) IS NULL THEN try_to_date(fun.date_updated) WHEN try_to_date(end_date) IS NULL THEN try_to_date(start_date) ELSE try_to_date(end_date) END) < YEAR(CURRENT_DATE) OR (YEAR(CASE WHEN try_to_date(end_date) IS NULL AND try_to_date(start_date) IS NULL THEN try_to_date(fun.date_updated) WHEN try_to_date(end_date) IS NULL THEN try_to_date(start_date) ELSE try_to_date(end_date) END) = YEAR(CURRENT_DATE) AND QUARTER(CASE WHEN try_to_date(end_date) IS NULL AND try_to_date(start_date) IS NULL THEN try_to_date(fun.date_updated) WHEN try_to_date(end_date) IS NULL THEN try_to_date(start_date) ELSE try_to_date(end_date) END) <= QUARTER(CURRENT_DATE)))
+
+)
+select 
+base.filename
+,upper(base.dataelement) as DataElement
+,pf.dept
+,pf.program
+,pf.other_funder_code 
+,CASE pf.project_type
+        WHEN 0 THEN ''Emergency Shelter – Entry Exit''
+        WHEN 1 THEN ''Emergency Shelter – Night-by-Night''
+        WHEN 2 THEN ''Transitional Housing''
+        WHEN 3 THEN ''PH – Permanent Supportive Housing''
+        WHEN 4 THEN ''Street Outreach''
+        WHEN 6 THEN ''Services Only''
+        WHEN 7 THEN ''Other''
+        WHEN 8 THEN ''Safe Haven''
+        WHEN 9 THEN ''PH – Housing Only''
+        WHEN 10 THEN ''PH – Housing with Services (no disability required for entry)''
+        WHEN 11 THEN ''Day Shelter''
+        WHEN 12 THEN ''Homelessness Prevention''
+        WHEN 13 THEN ''PH – Rapid Re-Housing''
+        WHEN 14 THEN ''Coordinated Entry''
+        ELSE ''Unknown''
+    END AS project_type
+,base.project_id
+,pf.project_name
+,pf.organization_id
+,base.quarter_year
+,pf.organization_name
+,pf.grant_id
+,pf.start_date
+,pf.end_date
+,base.query_name
+,base.pstg_row_id
+,dc.coc_dashboard_name
+,base.response_not_valid
+,base.data_not_collected
+,base.Client_Doesnt_Know
+,current_date() as date_loaded, 
+PRIORITIZATION
+from base
+join program_funder pf on base.project_id = pf.project_id and base.source_file = pf.source_file
+join hdis_prod.edw.dim_coc dc on dc.coc_id = base.source_file
+;
+
+-- Return message to confirm that the table has been refreshed
+RETURN ''Target tables refreshed successfully.'';
+END;
+';
